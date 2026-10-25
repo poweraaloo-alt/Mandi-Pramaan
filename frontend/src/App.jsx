@@ -7,6 +7,8 @@ import {
   Cpu,
   Download,
   Eye,
+  FileAudio,
+  ImagePlus,
   Lock,
   Mic,
   MicOff,
@@ -14,10 +16,11 @@ import {
   RotateCcw,
   Scale,
   ShieldCheck,
-  Sliders,
   Sparkles,
   Square,
+  Upload,
   Volume2,
+  Wand2,
 } from "lucide-react";
 import { generateKacchaParchiDataUrl } from "./utils/parchiCanvasGenerator";
 import { playBase64AudioOrFallback } from "./utils/audioHelper";
@@ -25,11 +28,13 @@ import {
   PRESET_CASES,
   STATE_APMC_RULES,
   buildBrowserMerkleAnchor,
+  buildDynamicReasoning,
   callLiveBulbulTts,
   callLiveSaarasStt,
   callLiveSarvam105B,
   computeStatutoryAudit,
   formatINR,
+  parseSpokenTranscriptWithSarvam,
 } from "./utils/standaloneEngine";
 
 const LANGUAGES = [
@@ -120,9 +125,9 @@ export default function App() {
     structuredClone(PRESET_CASES.sehore_wheat_fraud.written_parchi)
   );
   const [stateCode, setStateCode] = useState("MP");
-  const [showEditor, setShowEditor] = useState(false);
   const [activeFieldId, setActiveFieldId] = useState(null);
   const [parchiImageUrl, setParchiImageUrl] = useState("");
+  const [uploadedSlipPhoto, setUploadedSlipPhoto] = useState(null);
   const [merkle, setMerkle] = useState(null);
 
   // Live Sarvam AI telemetry & outputs
@@ -130,9 +135,12 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isSynthesizingTts, setIsSynthesizingTts] = useState(false);
   const [isCallingAi, setIsCallingAi] = useState(false);
+  const [isParsingText, setIsParsingText] = useState(false);
   const [isRecordingMic, setIsRecordingMic] = useState(false);
+  const [isTranscribingAudio, setIsTranscribingAudio] = useState(false);
   const [customReasoning, setCustomReasoning] = useState(null);
   const [copiedRoot, setCopiedRoot] = useState(false);
+  const [statusBanner, setStatusBanner] = useState("");
   const [telemetry, setTelemetry] = useState({
     saarasMs: 215,
     visionMs: 290,
@@ -147,74 +155,88 @@ export default function App() {
 
   const baseCase = PRESET_CASES[presetId] || PRESET_CASES.sehore_wheat_fraud;
   const audit = computeStatutoryAudit({ ...spoken, state_code: stateCode }, written);
-  const reasoning = customReasoning || baseCase.fallback_reasoning;
+  const dynamicFallback = buildDynamicReasoning(
+    { ...spoken, state_code: stateCode },
+    written,
+    audit
+  );
+  const reasoning = customReasoning || dynamicFallback;
   const statusMap = Object.fromEntries(
     audit.comparison_rows.map((r) => [r.field_id, r.status])
   );
 
   // Update handwritten Kaccha Parchi image & SHA-256 Merkle anchor whenever inputs change
   useEffect(() => {
-    const url = generateKacchaParchiDataUrl(written, spoken);
-    setParchiImageUrl(url);
+    if (!uploadedSlipPhoto) {
+      const url = generateKacchaParchiDataUrl(written, spoken);
+      setParchiImageUrl(url);
+    }
     buildBrowserMerkleAnchor({ ...spoken, state_code: stateCode }, written, audit).then(
       setMerkle
     );
-  }, [spoken, written, stateCode]);
+  }, [spoken, written, stateCode, uploadedSlipPhoto]);
 
-  // Automatically trigger live Sarvam-105B arbitration when preset or state law changes
+  // Run initial live Sarvam-105B arbitration on mount
   useEffect(() => {
-    let cancelled = false;
-    const runLive = async () => {
-      setIsCallingAi(true);
-      const currentSpoken = { ...spoken, state_code: stateCode };
-      const currentAudit = computeStatutoryAudit(currentSpoken, written);
-      const res = await callLiveSarvam105B(
-        currentSpoken,
-        written,
-        currentAudit,
-        baseCase.fallback_reasoning
-      );
-      if (!cancelled) {
-        if (res.liveUsed) {
-          setCustomReasoning(res.reasoning);
-        }
-        setTelemetry((prev) => ({
-          ...prev,
-          llmMs: res.latencyMs,
-          liveActive: prev.liveActive || res.liveUsed,
-        }));
-        setIsCallingAi(false);
-      }
-    };
-    runLive();
-    return () => {
-      cancelled = true;
-    };
-  }, [presetId, stateCode]);
+    runFullLiveArbitration(spoken, written, stateCode);
+  }, []);
+
+  const runFullLiveArbitration = async (
+    targetSpoken = spoken,
+    targetWritten = written,
+    targetState = stateCode
+  ) => {
+    setIsCallingAi(true);
+    const currentSpoken = { ...targetSpoken, state_code: targetState };
+    const currentAudit = computeStatutoryAudit(currentSpoken, targetWritten);
+    const dynFallback = buildDynamicReasoning(
+      currentSpoken,
+      targetWritten,
+      currentAudit
+    );
+    const res = await callLiveSarvam105B(
+      currentSpoken,
+      targetWritten,
+      currentAudit,
+      dynFallback
+    );
+    setCustomReasoning(res.reasoning);
+    setTelemetry((prev) => ({
+      ...prev,
+      llmMs: res.latencyMs,
+      liveActive: prev.liveActive || res.liveUsed,
+    }));
+    setIsCallingAi(false);
+  };
 
   const handleSelectPreset = (id) => {
     const next = PRESET_CASES[id];
     if (!next) return;
     setPresetId(id);
-    setSpoken(structuredClone(next.spoken_deal));
-    setWritten(structuredClone(next.written_parchi));
-    setStateCode(next.spoken_deal.state_code);
-    setSelectedLang(next.spoken_deal.language_code || "hi-IN");
-    setCustomReasoning(null);
+    const nextSpoken = structuredClone(next.spoken_deal);
+    const nextWritten = structuredClone(next.written_parchi);
+    setSpoken(nextSpoken);
+    setWritten(nextWritten);
+    setStateCode(nextSpoken.state_code);
+    setSelectedLang(nextSpoken.language_code || "hi-IN");
+    setUploadedSlipPhoto(null);
+    setStatusBanner("");
     if (stopAudioRef.current) {
       stopAudioRef.current();
       stopAudioRef.current = null;
       setIsPlaying(false);
     }
+    runFullLiveArbitration(nextSpoken, nextWritten, nextSpoken.state_code);
   };
 
-  const updateSlipNumbers = (patchSpoken, patchWritten) => {
+  const updateInputs = (patchSpoken, patchWritten) => {
     const nextSpoken = { ...spoken, ...patchSpoken };
-    if ("bags" in patchSpoken) {
+    if ("bags" in patchSpoken && !("agreed_net_weight_qtl" in patchSpoken)) {
       nextSpoken.agreed_net_weight_qtl = Number(
         ((Number(nextSpoken.bags) * 50) / 100).toFixed(2)
       );
     }
+
     const nextWritten = { ...written, ...patchWritten };
     const netW = Number(nextWritten.recorded_net_weight_qtl || 0);
     const karda = Number(nextWritten.karda_moisture_cut_qtl || 0);
@@ -231,27 +253,51 @@ export default function App() {
 
     setSpoken(nextSpoken);
     setWritten(nextWritten);
+    setCustomReasoning(null);
   };
 
-  const handleManualSarvam105BReview = async () => {
-    setIsCallingAi(true);
-    const currentSpoken = { ...spoken, state_code: stateCode };
-    const currentAudit = computeStatutoryAudit(currentSpoken, written);
-    const res = await callLiveSarvam105B(
-      currentSpoken,
-      written,
-      currentAudit,
-      baseCase.fallback_reasoning
-    );
-    if (res.liveUsed) {
-      setCustomReasoning(res.reasoning);
+  // Extract structured numbers from user-typed transcript via Sarvam-105B
+  const handleExtractFromTranscript = async () => {
+    setIsParsingText(true);
+    setStatusBanner("Extracting auction terms from your text with Sarvam AI...");
+    const res = await parseSpokenTranscriptWithSarvam(spoken.transcript, spoken);
+    setIsParsingText(false);
+    if (res.parsed) {
+      const updatedSpoken = {
+        ...spoken,
+        ...res.parsed,
+        timestamp_spans: [
+          {
+            field_id: "weight_row",
+            time_label: "00:01.0 - 00:04.2",
+            spoken_text: spoken.transcript.slice(0, 70),
+            extracted_claim: `${res.parsed.bags} Bags = ${res.parsed.agreed_net_weight_qtl} Qtl Net Weight`,
+          },
+          {
+            field_id: "rate_row",
+            time_label: "00:04.3 - 00:08.0",
+            spoken_text: `बोली भाव ₹${res.parsed.agreed_rate_per_qtl} प्रति क्विंटल`,
+            extracted_claim: `Agreed Rate: ₹${res.parsed.agreed_rate_per_qtl}/Qtl`,
+          },
+          {
+            field_id: "deductions_block",
+            time_label: "00:08.1 - 00:11.0",
+            spoken_text: `हम्माली ₹${res.parsed.authorized_hammali_inr}, आड़त ₹0`,
+            extracted_claim: `0% Farmer Aadat; Authorized Labor: ₹${res.parsed.authorized_hammali_inr}`,
+          },
+        ],
+      };
+      setSpoken(updatedSpoken);
+      setStatusBanner(
+        `✓ Extracted from text (${res.latencyMs}ms): ${res.parsed.farmer_name}, ${res.parsed.bags} Bags (${res.parsed.agreed_net_weight_qtl} Qtl) @ ₹${res.parsed.agreed_rate_per_qtl}/Qtl`
+      );
+      await runFullLiveArbitration(updatedSpoken, written, stateCode);
+    } else {
+      setStatusBanner(
+        "Updated transcript. Adjust the numeric fields below or click Run Live Sarvam Arbitration."
+      );
+      await runFullLiveArbitration(spoken, written, stateCode);
     }
-    setTelemetry((prev) => ({
-      ...prev,
-      llmMs: res.latencyMs,
-      liveActive: prev.liveActive || res.liveUsed,
-    }));
-    setIsCallingAi(false);
   };
 
   // Live Microphone Recording -> Saaras v4 ASR
@@ -271,10 +317,30 @@ export default function App() {
       };
       recorder.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
+        setIsTranscribingAudio(true);
+        setStatusBanner("Transcribing live microphone audio with Sarvam Saaras v4...");
         const blob = new Blob(audioChunksRef.current, { type: "audio/wav" });
         const sttRes = await callLiveSaarasStt(blob, spoken.language_code || "hi-IN");
+        setIsTranscribingAudio(false);
         if (sttRes.transcript) {
-          setSpoken((prev) => ({ ...prev, transcript: sttRes.transcript }));
+          const nextSpoken = { ...spoken, transcript: sttRes.transcript };
+          setSpoken(nextSpoken);
+          setStatusBanner(
+            `✓ Saaras v4 transcribed audio (${sttRes.latencyMs}ms): "${sttRes.transcript}"`
+          );
+          const parsedRes = await parseSpokenTranscriptWithSarvam(
+            sttRes.transcript,
+            nextSpoken
+          );
+          const finalSpoken = parsedRes.parsed
+            ? { ...nextSpoken, ...parsedRes.parsed }
+            : nextSpoken;
+          setSpoken(finalSpoken);
+          await runFullLiveArbitration(finalSpoken, written, stateCode);
+        } else {
+          setStatusBanner(
+            "Microphone audio captured. Type or edit the transcript box below and click Run Arbitration."
+          );
         }
         setTelemetry((prev) => ({
           ...prev,
@@ -285,9 +351,62 @@ export default function App() {
       mediaRecorderRef.current = recorder;
       recorder.start();
       setIsRecordingMic(true);
+      setStatusBanner("🎙️ Recording from microphone... Speak the auction deal now, then click Stop.");
     } catch (e) {
-      console.warn("Microphone access denied or unavailable:", e);
+      setStatusBanner(
+        "Microphone permission was blocked by browser. You can upload an audio file or type in the box below."
+      );
     }
+  };
+
+  // Upload Audio File (.wav, .mp3, .m4a) -> Saaras v4 ASR
+  const handleAudioFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsTranscribingAudio(true);
+    setStatusBanner(`Uploading "${file.name}" to Sarvam Saaras v4 ASR...`);
+    const sttRes = await callLiveSaarasStt(file, spoken.language_code || "hi-IN");
+    setIsTranscribingAudio(false);
+    if (sttRes.transcript) {
+      const nextSpoken = { ...spoken, transcript: sttRes.transcript };
+      setSpoken(nextSpoken);
+      setStatusBanner(
+        `✓ Saaras v4 transcribed "${file.name}" (${sttRes.latencyMs}ms): "${sttRes.transcript}"`
+      );
+      const parsedRes = await parseSpokenTranscriptWithSarvam(
+        sttRes.transcript,
+        nextSpoken
+      );
+      const finalSpoken = parsedRes.parsed
+        ? { ...nextSpoken, ...parsedRes.parsed }
+        : nextSpoken;
+      setSpoken(finalSpoken);
+      await runFullLiveArbitration(finalSpoken, written, stateCode);
+    } else {
+      setStatusBanner(`Loaded audio file "${file.name}".`);
+    }
+    setTelemetry((prev) => ({
+      ...prev,
+      saarasMs: sttRes.latencyMs,
+      liveActive: prev.liveActive || sttRes.liveUsed,
+    }));
+  };
+
+  // Upload Custom Kaccha Parchi Slip Photo
+  const handleSlipImageUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setUploadedSlipPhoto(reader.result);
+        setParchiImageUrl(reader.result);
+        setStatusBanner(
+          `✓ Uploaded custom Kaccha Parchi image "${file.name}". Adjust or confirm the extracted slip numbers on the right and click Run Live Sarvam Arbitration.`
+        );
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   // Live Bulbul v3 24kHz Voice Synthesis
@@ -364,7 +483,9 @@ export default function App() {
           <div className="hidden xl:flex items-center gap-2 text-xs font-mono bg-slate-950/90 border border-slate-800 rounded-xl px-3.5 py-1.5">
             <span className="flex items-center gap-1 text-sky-400">
               <Mic className="w-3.5 h-3.5" /> Saaras v4:{" "}
-              <strong>{telemetry.saarasMs}ms</strong>
+              <strong>
+                {isTranscribingAudio ? "transcribing..." : `${telemetry.saarasMs}ms`}
+              </strong>
             </span>
             <span className="text-slate-600">→</span>
             <span className="flex items-center gap-1 text-amber-400">
@@ -393,11 +514,14 @@ export default function App() {
           <div className="flex items-center gap-2.5">
             <div className="flex items-center gap-1.5 text-xs text-slate-400">
               <Lock className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="hidden sm:inline">Statute:</span>
+              <span className="hidden sm:inline">APMC Act:</span>
             </div>
             <select
               value={stateCode}
-              onChange={(e) => setStateCode(e.target.value)}
+              onChange={(e) => {
+                setStateCode(e.target.value);
+                runFullLiveArbitration(spoken, written, e.target.value);
+              }}
               className="rounded-lg bg-slate-800 border border-slate-700 text-amber-300 text-xs font-semibold px-3 py-2 focus:outline-none focus:border-amber-400"
             >
               {Object.entries(STATE_APMC_RULES).map(([code, info]) => (
@@ -414,225 +538,398 @@ export default function App() {
       {/* MAIN DASHBOARD CONTAINER                                            */}
       {/* =================================================================== */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
-        {/* 1. CASE SELECTOR CARDS */}
-        <section className="space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Select Live APMC Auction Case Preset
+        {/* ================================================================= */}
+        {/* 1. ALWAYS-VISIBLE MULTIMODAL INPUT STUDIO (ENTER YOUR OWN DATA!)  */}
+        {/* ================================================================= */}
+        <section className="bg-white border-2 border-amber-500/80 rounded-2xl p-5 sm:p-6 shadow-md space-y-5">
+          {/* Studio Header + Quick Sample Loaders */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
+            <div>
+              <span className="text-xs font-extrabold uppercase tracking-wider text-amber-700">
+                Interactive Multimodal Input Studio
+              </span>
+              <h2 className="text-lg sm:text-xl font-extrabold text-slate-900">
+                Enter Your Own Auction Deal &amp; Kaccha Parchi Slip (or Load a Sample)
+              </h2>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-bold text-slate-500 mr-1">
+                Quick-Fill Sample:
+              </span>
+              {Object.values(PRESET_CASES).map((item) => (
+                <button
+                  key={item.case_id}
+                  type="button"
+                  onClick={() => handleSelectPreset(item.case_id)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                    presetId === item.case_id && !uploadedSlipPhoto
+                      ? "bg-amber-600 text-white border-amber-600 shadow-xs"
+                      : "bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200"
+                  }`}
+                >
+                  {item.short_title}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {statusBanner && (
+            <div className="px-4 py-2.5 rounded-xl bg-sky-50 border border-sky-300 text-xs sm:text-sm font-semibold text-sky-950 flex items-center justify-between gap-2">
+              <span>{statusBanner}</span>
+              <button
+                type="button"
+                onClick={() => setStatusBanner("")}
+                className="text-xs font-bold text-sky-700 hover:underline cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {/* TWO-COLUMN LIVE INPUT FORM */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* LEFT INPUT: SPOKEN AUCTION (SAARAS v4 + DEAL INPUTS) */}
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <span className="text-[11px] font-bold uppercase text-sky-700">
+                    Input 1 · Spoken Auction Boli (Saaras v4 ASR)
+                  </span>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    Record Voice, Upload Audio, or Type Auction Deal
+                  </h3>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleToggleMic}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition ${
+                      isRecordingMic
+                        ? "bg-red-600 text-white animate-pulse"
+                        : "bg-sky-600 hover:bg-sky-700 text-white shadow-xs"
+                    }`}
+                  >
+                    {isRecordingMic ? (
+                      <>
+                        <MicOff className="w-3.5 h-3.5" />
+                        <span>Stop Recording</span>
+                      </>
+                    ) : (
+                      <>
+                        <Mic className="w-3.5 h-3.5" />
+                        <span>Record Mic</span>
+                      </>
+                    )}
+                  </button>
+
+                  <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 cursor-pointer transition">
+                    <FileAudio className="w-3.5 h-3.5 text-sky-700" />
+                    <span>Upload Audio</span>
+                    <input
+                      type="file"
+                      accept="audio/*"
+                      onChange={handleAudioFileUpload}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {/* Editable Spoken Transcript Box */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700">
+                    Spoken Auction Transcript (Hindi / Marathi / Punjabi / English):
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleExtractFromTranscript}
+                    disabled={isParsingText}
+                    className="flex items-center gap-1 text-xs font-bold text-sky-800 hover:underline cursor-pointer"
+                  >
+                    <Wand2 className="w-3.5 h-3.5" />
+                    <span>
+                      {isParsingText
+                        ? "Extracting with Sarvam AI..."
+                        : "Extract Numbers from Text"}
+                    </span>
+                  </button>
+                </div>
+                <textarea
+                  rows={2}
+                  value={spoken.transcript}
+                  onChange={(e) => updateInputs({ transcript: e.target.value }, {})}
+                  placeholder="Type or record what was said at the auction (e.g. किसान रमेश का 52 बोरी गेहूँ 26 क्विंटल, बोली 2650 रुपये क्विंटल फाइनल)..."
+                  className="w-full rounded-xl bg-white border border-slate-300 px-3 py-2 text-sm font-medium text-slate-900 focus:outline-none focus:border-sky-600"
+                />
+              </div>
+
+              {/* Direct Structured Spoken Deal Inputs */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm pt-1">
+                <div className="col-span-2 sm:col-span-1">
+                  <label className="block text-xs font-bold text-slate-600 mb-1">
+                    Farmer Name
+                  </label>
+                  <input
+                    type="text"
+                    value={spoken.farmer_name}
+                    onChange={(e) =>
+                      updateInputs({ farmer_name: e.target.value }, {})
+                    }
+                    className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-semibold text-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">
+                    Commodity
+                  </label>
+                  <input
+                    type="text"
+                    value={spoken.commodity_label}
+                    onChange={(e) =>
+                      updateInputs({ commodity_label: e.target.value }, {})
+                    }
+                    className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-semibold text-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">
+                    Bags (50kg each)
+                  </label>
+                  <input
+                    type="number"
+                    value={spoken.bags}
+                    onChange={(e) =>
+                      updateInputs({ bags: Number(e.target.value) }, {})
+                    }
+                    className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-bold text-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">
+                    Agreed Weight (Qtl)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={spoken.agreed_net_weight_qtl}
+                    onChange={(e) =>
+                      updateInputs(
+                        { agreed_net_weight_qtl: Number(e.target.value) },
+                        {}
+                      )
+                    }
+                    className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-bold text-emerald-800"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs font-bold text-slate-600 mb-1">
+                    Spoken Auction Bid Rate (₹ / Quintal)
+                  </label>
+                  <input
+                    type="number"
+                    value={spoken.agreed_rate_per_qtl}
+                    onChange={(e) =>
+                      updateInputs(
+                        { agreed_rate_per_qtl: Number(e.target.value) },
+                        {}
+                      )
+                    }
+                    className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-extrabold text-emerald-800"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* RIGHT INPUT: WRITTEN KACCHA PARCHI SLIP (UPLOAD PHOTO OR EDIT SLIP) */}
+            <div className="bg-amber-50/50 border border-amber-200 rounded-2xl p-4 space-y-3.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <span className="text-[11px] font-bold uppercase text-amber-800">
+                    Input 2 · Written Kaccha Parchi Slip (Sarvam Vision)
+                  </span>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    Upload Slip Photo or Enter Written Slip Figures
+                  </h3>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white cursor-pointer transition shadow-xs">
+                    <ImagePlus className="w-3.5 h-3.5" />
+                    <span>Upload Slip Photo</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleSlipImageUpload}
+                      className="hidden"
+                    />
+                  </label>
+                  {uploadedSlipPhoto && (
+                    <button
+                      type="button"
+                      onClick={() => setUploadedSlipPhoto(null)}
+                      className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-white border border-slate-300 text-slate-700 cursor-pointer"
+                    >
+                      Use Generated Slip
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+                <div className="col-span-2 sm:col-span-3">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Trader / Arthiya Firm Name
+                  </label>
+                  <input
+                    type="text"
+                    value={written.trader_firm}
+                    onChange={(e) =>
+                      updateInputs({}, { trader_firm: e.target.value })
+                    }
+                    className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-semibold text-slate-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Slip Net Weight (Qtl)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={written.recorded_net_weight_qtl}
+                    onChange={(e) =>
+                      updateInputs(
+                        {},
+                        { recorded_net_weight_qtl: Number(e.target.value) }
+                      )
+                    }
+                    className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-bold text-red-700"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Karda / Weight Cut (Qtl)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    value={written.karda_moisture_cut_qtl}
+                    onChange={(e) =>
+                      updateInputs(
+                        {},
+                        { karda_moisture_cut_qtl: Number(e.target.value) }
+                      )
+                    }
+                    className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-bold text-red-700"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Written Rate (₹/Qtl)
+                  </label>
+                  <input
+                    type="number"
+                    value={written.written_rate_per_qtl}
+                    onChange={(e) =>
+                      updateInputs(
+                        {},
+                        { written_rate_per_qtl: Number(e.target.value) }
+                      )
+                    }
+                    className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-bold text-red-700"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Aadat Commission (₹)
+                  </label>
+                  <input
+                    type="number"
+                    value={written.deducted_aadat_inr}
+                    onChange={(e) =>
+                      updateInputs(
+                        {},
+                        { deducted_aadat_inr: Number(e.target.value) }
+                      )
+                    }
+                    className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-bold text-red-700"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Hammali / Labor (₹)
+                  </label>
+                  <input
+                    type="number"
+                    value={written.deducted_hammali_tulai_inr}
+                    onChange={(e) =>
+                      updateInputs(
+                        {},
+                        { deducted_hammali_tulai_inr: Number(e.target.value) }
+                      )
+                    }
+                    className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-bold text-slate-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Dharmada / Muddat (₹)
+                  </label>
+                  <input
+                    type="number"
+                    value={written.deducted_dharmada_inr}
+                    onChange={(e) =>
+                      updateInputs(
+                        {},
+                        { deducted_dharmada_inr: Number(e.target.value) }
+                      )
+                    }
+                    className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-bold text-red-700"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-1 flex items-center justify-between text-xs font-bold text-amber-950 border-t border-amber-200/80">
+                <span>Computed Slip Net Payable:</span>
+                <span className="text-base font-extrabold text-slate-900">
+                  {formatINR(written.written_net_payable_inr)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* PRIMARY SUBMIT & RUN BUTTON */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200">
+            <span className="text-xs text-slate-600">
+              All statutory math &amp; handwritten slip visuals update live as you type.
+              Click the button on the right to run a fresh{" "}
+              <strong>Sarvam-105B</strong> legal review on your custom inputs.
             </span>
+
             <button
               type="button"
-              onClick={() => setShowEditor(!showEditor)}
-              className="flex items-center gap-1.5 text-xs font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-300 px-3 py-1.5 rounded-lg cursor-pointer transition"
+              onClick={() => runFullLiveArbitration(spoken, written, stateCode)}
+              disabled={isCallingAi}
+              className="flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-extrabold text-sm shadow-md cursor-pointer transition disabled:opacity-60"
             >
-              <Sliders className="w-3.5 h-3.5" />
+              <Sparkles className="w-4 h-4" />
               <span>
-                {showEditor
-                  ? "Hide Custom Number Simulator"
-                  : "✏️ Edit Auction / Slip Numbers Live"}
+                {isCallingAi
+                  ? "Running Live Sarvam AI Arbitration..."
+                  : "🚀 Run Live Sarvam AI Arbitration on These Inputs"}
               </span>
             </button>
           </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
-            {Object.values(PRESET_CASES).map((item) => {
-              const active = presetId === item.case_id;
-              const isClean = item.severity === "COMPLIANT";
-              return (
-                <button
-                  key={item.case_id}
-                  onClick={() => handleSelectPreset(item.case_id)}
-                  className={`text-left p-4 rounded-2xl border-2 transition cursor-pointer bg-white shadow-xs ${
-                    active
-                      ? "border-amber-600 ring-4 ring-amber-500/15"
-                      : "border-slate-200 hover:border-slate-300"
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2 mb-1.5">
-                    <span
-                      className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-0.5 rounded-full border ${
-                        isClean
-                          ? "bg-emerald-50 text-emerald-800 border-emerald-300"
-                          : "bg-red-50 text-red-800 border-red-300"
-                      }`}
-                    >
-                      {isClean ? (
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                      ) : (
-                        <AlertTriangle className="w-3.5 h-3.5" />
-                      )}
-                      {item.badge_text}
-                    </span>
-                    {active && (
-                      <span className="text-xs font-extrabold text-amber-700">
-                        ● ACTIVE CASE
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-base font-extrabold text-slate-900">
-                    {item.short_title}
-                  </div>
-                  <div className="text-xs text-slate-500 mt-1">
-                    Farmer: {item.spoken_deal.farmer_name} ·{" "}
-                    {item.spoken_deal.bags} Bags ({item.spoken_deal.agreed_net_weight_qtl}{" "}
-                    Qtl)
-                  </div>
-                </button>
-              );
-            })}
-          </div>
         </section>
-
-        {/* OPTIONAL INTERACTIVE NUMBER SIMULATOR */}
-        {showEditor && (
-          <section className="bg-amber-50/70 border-2 border-amber-300 rounded-2xl p-5 space-y-3 shadow-xs">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-extrabold text-amber-950 flex items-center gap-2">
-                <Sliders className="w-4 h-4 text-amber-700" />
-                <span>
-                  Live Slip &amp; Auction Tamper Simulator (Updates Handwritten Slip Image
-                  &amp; APMC Audit Automatically)
-                </span>
-              </h3>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleManualSarvam105BReview}
-                  disabled={isCallingAi}
-                  className="flex items-center gap-1.5 text-xs font-bold text-white bg-purple-700 hover:bg-purple-800 px-3 py-1.5 rounded-lg cursor-pointer"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>
-                    {isCallingAi
-                      ? "Calling Sarvam-105B..."
-                      : "Re-Analyze with Live Sarvam-105B"}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSelectPreset(presetId)}
-                  className="flex items-center gap-1 text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 px-3 py-1.5 rounded-lg cursor-pointer"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Reset</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 text-sm">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Bags (50kg)
-                </label>
-                <input
-                  type="number"
-                  value={spoken.bags}
-                  onChange={(e) =>
-                    updateSlipNumbers({ bags: Number(e.target.value) }, {})
-                  }
-                  className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-bold"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Auction Rate (₹)
-                </label>
-                <input
-                  type="number"
-                  value={spoken.agreed_rate_per_qtl}
-                  onChange={(e) =>
-                    updateSlipNumbers(
-                      { agreed_rate_per_qtl: Number(e.target.value) },
-                      {}
-                    )
-                  }
-                  className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-bold text-emerald-800"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Slip Net Wt (Qtl)
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={written.recorded_net_weight_qtl}
-                  onChange={(e) =>
-                    updateSlipNumbers(
-                      {},
-                      { recorded_net_weight_qtl: Number(e.target.value) }
-                    )
-                  }
-                  className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-bold text-red-700"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Slip Rate (₹)
-                </label>
-                <input
-                  type="number"
-                  value={written.written_rate_per_qtl}
-                  onChange={(e) =>
-                    updateSlipNumbers(
-                      {},
-                      { written_rate_per_qtl: Number(e.target.value) }
-                    )
-                  }
-                  className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-bold text-red-700"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Aadat Cut (₹)
-                </label>
-                <input
-                  type="number"
-                  value={written.deducted_aadat_inr}
-                  onChange={(e) =>
-                    updateSlipNumbers(
-                      {},
-                      { deducted_aadat_inr: Number(e.target.value) }
-                    )
-                  }
-                  className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-bold text-red-700"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Hammali (₹)
-                </label>
-                <input
-                  type="number"
-                  value={written.deducted_hammali_tulai_inr}
-                  onChange={(e) =>
-                    updateSlipNumbers(
-                      {},
-                      { deducted_hammali_tulai_inr: Number(e.target.value) }
-                    )
-                  }
-                  className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-bold"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Dharmada (₹)
-                </label>
-                <input
-                  type="number"
-                  value={written.deducted_dharmada_inr}
-                  onChange={(e) =>
-                    updateSlipNumbers(
-                      {},
-                      { deducted_dharmada_inr: Number(e.target.value) }
-                    )
-                  }
-                  className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-bold text-red-700"
-                />
-              </div>
-            </div>
-          </section>
-        )}
 
         {/* 2. HERO VERDICT BANNER + 3 FINANCIAL CARDS */}
         <section
@@ -735,77 +1032,55 @@ export default function App() {
                     className="w-full h-auto block"
                   />
                 )}
-                <svg
-                  viewBox="0 0 1000 1000"
-                  preserveAspectRatio="none"
-                  className="absolute inset-0 w-full h-full"
-                >
-                  {(written.bounding_boxes || []).map((box) => {
-                    const [xMin, yMin, xMax, yMax] = box.bbox;
-                    const rowSt = statusMap[box.field_id] || box.status;
-                    const isBad = rowSt !== "COMPLIANT";
-                    const isActive = activeFieldId === box.field_id;
-                    return (
-                      <rect
-                        key={box.field_id}
-                        x={xMin * 1000}
-                        y={yMin * 1000}
-                        width={(xMax - xMin) * 1000}
-                        height={(yMax - yMin) * 1000}
-                        rx={14}
-                        fill={
-                          isActive
-                            ? isBad
-                              ? "rgba(185, 28, 28, 0.22)"
-                              : "rgba(21, 128, 61, 0.18)"
-                            : "transparent"
-                        }
-                        stroke={isBad ? "#DC2626" : "#16A34A"}
-                        strokeWidth={isActive ? 7 : isBad ? 5 : 3}
-                        strokeDasharray={isBad ? "14 6" : "none"}
-                        onMouseEnter={() => setActiveFieldId(box.field_id)}
-                        onMouseLeave={() => setActiveFieldId(null)}
-                        className="cursor-pointer"
-                      />
-                    );
-                  })}
-                </svg>
+                {!uploadedSlipPhoto && (
+                  <svg
+                    viewBox="0 0 1000 1000"
+                    preserveAspectRatio="none"
+                    className="absolute inset-0 w-full h-full"
+                  >
+                    {(written.bounding_boxes || []).map((box) => {
+                      const [xMin, yMin, xMax, yMax] = box.bbox;
+                      const rowSt = statusMap[box.field_id] || box.status;
+                      const isBad = rowSt !== "COMPLIANT";
+                      const isActive = activeFieldId === box.field_id;
+                      return (
+                        <rect
+                          key={box.field_id}
+                          x={xMin * 1000}
+                          y={yMin * 1000}
+                          width={(xMax - xMin) * 1000}
+                          height={(yMax - yMin) * 1000}
+                          rx={14}
+                          fill={
+                            isActive
+                              ? isBad
+                                ? "rgba(185, 28, 28, 0.22)"
+                                : "rgba(21, 128, 61, 0.18)"
+                              : "transparent"
+                          }
+                          stroke={isBad ? "#DC2626" : "#16A34A"}
+                          strokeWidth={isActive ? 7 : isBad ? 5 : 3}
+                          strokeDasharray={isBad ? "14 6" : "none"}
+                          onMouseEnter={() => setActiveFieldId(box.field_id)}
+                          onMouseLeave={() => setActiveFieldId(null)}
+                          className="cursor-pointer"
+                        />
+                      );
+                    })}
+                  </svg>
+                )}
               </div>
             </div>
 
-            {/* Spoken Auction Transcript & Live Mic Recorder Card */}
+            {/* Spoken Auction Transcript & Timestamps Card */}
             <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-sky-700">
-                    Stage 1 · Saaras v4 Code-Mixed ASR
-                  </span>
-                  <h3 className="text-base font-extrabold text-slate-900">
-                    Verbatim Spoken Auction (Boli)
-                  </h3>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleToggleMic}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition ${
-                    isRecordingMic
-                      ? "bg-red-600 text-white animate-pulse"
-                      : "bg-sky-100 hover:bg-sky-200 text-sky-900 border border-sky-300"
-                  }`}
-                >
-                  {isRecordingMic ? (
-                    <>
-                      <MicOff className="w-3.5 h-3.5" />
-                      <span>Stop &amp; Transcribe</span>
-                    </>
-                  ) : (
-                    <>
-                      <Mic className="w-3.5 h-3.5" />
-                      <span>Record Live Boli</span>
-                    </>
-                  )}
-                </button>
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-sky-700">
+                  Stage 1 · Saaras v4 Code-Mixed ASR
+                </span>
+                <h3 className="text-base font-extrabold text-slate-900">
+                  Extracted Spoken Claims
+                </h3>
               </div>
 
               <blockquote className="border-l-4 border-amber-600 bg-amber-50/70 p-3.5 rounded-r-xl text-sm sm:text-base font-medium text-slate-900 leading-relaxed">
@@ -855,29 +1130,13 @@ export default function App() {
           <div className="lg:col-span-7 space-y-6">
             {/* Fact-vs-Hypothesis Comparison Cards */}
             <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-purple-700">
-                    Stage 3 · Deterministic APMC Engine + Live Sarvam-105B
-                  </span>
-                  <h3 className="text-base font-extrabold text-slate-900">
-                    Spoken Deal vs. Written Slip Audit Breakdown
-                  </h3>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleManualSarvam105BReview}
-                  disabled={isCallingAi}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-700 hover:bg-purple-800 text-white text-xs font-bold cursor-pointer transition disabled:opacity-60"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>
-                    {isCallingAi
-                      ? "Sarvam-105B Analyzing..."
-                      : "Re-Verify with Sarvam-105B"}
-                  </span>
-                </button>
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-purple-700">
+                  Stage 3 · Deterministic APMC Engine + Live Sarvam-105B
+                </span>
+                <h3 className="text-base font-extrabold text-slate-900">
+                  Spoken Deal vs. Written Slip Audit Breakdown
+                </h3>
               </div>
 
               <div className="space-y-3">

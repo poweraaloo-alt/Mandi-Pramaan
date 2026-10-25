@@ -19,11 +19,129 @@ function resolveRuntimeCredential() {
   }
 }
 
-export async function callLiveSarvam105B(spoken, written, audit, fallbackReasoning) {
+/**
+ * Generates dynamic native-script advisories from the current audit numbers so that
+ * custom user inputs ALWAYS produce accurate Hindi/Marathi/Punjabi/Tamil/Telugu scripts.
+ */
+export function buildDynamicReasoning(spoken, written, audit) {
+  const underpaid = audit.total_farmer_underpayment_inr;
+  const lawful = audit.lawful_net_payable_inr;
+  const slipNet = audit.written_net_payable_inr;
+  const farmer = spoken.farmer_name || "किसान भाई";
+
+  if (underpaid <= 0) {
+    return {
+      executive_verdict_title: `VERIFIED COMPLIANT: 100% Match Under ${audit.state_act_name}`,
+      legal_summary: `Spoken auction terms (${spoken.bags} bags = ${audit.expected_net_weight_qtl} Qtl @ ₹${spoken.agreed_rate_per_qtl}/Qtl) and written Kaccha Parchi (${written.recorded_net_weight_qtl} Qtl @ ₹${written.written_rate_per_qtl}/Qtl) match with zero unlawful deductions. Lawful Net Payable is ₹${lawful.toLocaleString("en-IN")}.`,
+      statutory_notices: [
+        `${audit.state_act_name}: 0% seller commission and lawful weighment verified.`,
+        `Eligible for instant 80% ONDC / e-Mandi credit settlement.`,
+      ],
+      farmer_spoken_summary_native: `किसान भाई ${farmer}, मंडी-प्रमाण की जांच में आपकी पर्ची सौ प्रतिशत सही पाई गई है। आपका पूरा भुगतान ${Math.round(lawful)} रुपये प्रमाणित है।`,
+      multilingual_scripts: {
+        "hi-IN": `किसान भाई ${farmer}, मंडी-प्रमाण की जांच में आपकी पर्ची सौ प्रतिशत सही पाई गई है। आपका पूरा कानूनी भुगतान ${Math.round(lawful)} रुपये तुरंत निपटान के लिए प्रमाणित है।`,
+        "mr-IN": `शेतकरी बांधव ${farmer}, मंडी-प्रमाणच्या तपासणीत तुमची पावती शंभर टक्के अचूक आढळली आहे. तुमची देय रक्कम ${Math.round(lawful)} रुपये प्रमाणित आहे.`,
+        "pa-IN": `ਕਿਸਾਨ ਵੀਰ, ਮੰਡੀ-ਪ੍ਰਮਾਣ ਦੀ ਜਾਂਚ ਵਿੱਚ ਤੁਹਾਡੀ ਪਰਚੀ ਸੌ ਫੀਸਦੀ ਸਹੀ ਪਾਈ ਗਈ ਹੈ। ਤੁਹਾਡੀ ਪੂਰੀ ਰਕਮ ${Math.round(lawful)} ਰੁਪਏ ਪ੍ਰਮਾਣਿਤ ਹੈ।`,
+        "ta-IN": `விவசாயி அவர்களே, மண்டி-பிரமாண் ஆய்வில் உங்கள் ரசீது நூறு சதவீதம் சரியாக உள்ளது. உங்களுக்கு சேர வேண்டிய தொகை ${Math.round(lawful)} ரூபாய் ஆகும்.`,
+        "te-IN": `రైతు సోదరుడా, మండీ-ప్రమాణ్ తనిఖీలో మీ రసీదు నూరు శాతం సరిగ్గా ఉంది. మీకు రావాల్సిన మొత్తం ${Math.round(lawful)} రూపాయలు.`,
+      },
+    };
+  }
+
+  return {
+    executive_verdict_title: `STATUTORY VIOLATION: Farmer Underpaid by ${formatINR(underpaid)} (${audit.violation_count} Violations)`,
+    legal_summary: `Under ${audit.state_act_name}, trader ${written.trader_firm} underpaid ${farmer} by ${formatINR(underpaid)} (Lawful Payable: ${formatINR(lawful)} vs. Slip Payable: ${formatINR(slipNet)}). Weight cut loss: ${formatINR(audit.weight_loss_inr)}, Rate tampering loss: ${formatINR(audit.rate_loss_inr)}, Illegal Aadat/Dharmada cuts: ${formatINR(audit.illegal_aadat_inr + audit.illegal_dharmada_muddat_inr)}.`,
+    statutory_notices: audit.comparison_rows
+      .filter((r) => r.status !== "COMPLIANT" && r.field_id !== "net_payable_box")
+      .map((r) => `${r.bylaw_citation} — ${r.legal_hypothesis}`),
+    farmer_spoken_summary_native: `किसान भाई ${farmer}, मंडी-प्रमाण की जांच में आपकी कच्ची पर्ची में ${Math.round(underpaid)} रुपये की गड़बड़ी पकड़ी गई है। सही हिसाब से आपको ${Math.round(lawful)} रुपये मिलने चाहिए थे, लेकिन पर्ची में केवल ${Math.round(slipNet)} रुपये लिखे गए हैं।`,
+    multilingual_scripts: {
+      "hi-IN": `किसान भाई ${farmer}, मंडी-प्रमाण की जांच में आपकी कच्ची पर्ची में ${Math.round(underpaid)} रुपये की गड़बड़ी पकड़ी गई है। सही हिसाब से आपको ${Math.round(lawful)} रुपये मिलने चाहिए थे, लेकिन पर्ची में केवल ${Math.round(slipNet)} रुपये लिखे गए हैं।`,
+      "mr-IN": `शेतकरी बांधव, मंडी-प्रमाणच्या तपासणीत तुमच्या कच्च्या पावतीमध्ये ${Math.round(underpaid)} रुपयांची तफावत आढळली आहे. तुमची कायदेशीर देय रक्कम ${Math.round(lawful)} रुपये आहे, पण पावतीवर फक्त ${Math.round(slipNet)} रुपये लिहिले आहेत.`,
+      "pa-IN": `ਕਿਸਾਨ ਵੀਰ, ਮੰਡੀ-ਪ੍ਰਮਾਣ ਦੀ ਜਾਂਚ ਵਿੱਚ ਤੁਹਾਡੀ ਕੱਚੀ ਪਰਚੀ ਵਿੱਚ ${Math.round(underpaid)} ਰੁਪਏ ਦੀ ਗੜਬੜੀ ਫੜੀ ਗਈ ਹੈ। ਤੁਹਾਡੀ ਸਹੀ ਕਾਨੂੰਨੀ ਰਕਮ ${Math.round(lawful)} ਰੁਪਏ ਬਣਦੀ ਹੈ, ਪਰ ਪਰਚੀ ਵਿੱਚ ${Math.round(slipNet)} ਰੁਪਏ ਲਿਖੇ ਗਏ ਹਨ।`,
+      "ta-IN": `விவசாயி அவர்களே, மண்டி-பிரமாண் ஆய்வில் உங்கள் ரசீதில் ${Math.round(underpaid)} ரூபாய் முறைகேடு கண்டறியப்பட்டுள்ளது. உங்களுக்கு சேர வேண்டிய சரியான தொகை ${Math.round(lawful)} ரூபாய் ஆகும்.`,
+      "te-IN": `రైతు సోదరుడా, మండీ-ప్రమాణ్ తనిఖీలో మీ రసీదులో ${Math.round(underpaid)} రూపాయల తేడా బయటపడింది. మీకు రావాల్సిన సరైన మొత్తం ${Math.round(lawful)} రూపాయలు.`,
+    },
+  };
+}
+
+/**
+ * Uses live `sarvam-105b-conversations` to extract structured auction numbers from any
+ * free-form Hindi/Marathi/Punjabi/English spoken transcript entered by the user!
+ */
+export async function parseSpokenTranscriptWithSarvam(transcriptText, currentSpoken) {
   const t0 = performance.now();
   const key = resolveRuntimeCredential();
+  if (!key || !transcriptText?.trim()) {
+    return { parsed: null, latencyMs: 190, liveUsed: false };
+  }
+
+  try {
+    const resp = await fetch("https://api.sarvam.ai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "api-subscription-key": key,
+      },
+      body: JSON.stringify({
+        model: "sarvam-105b-conversations",
+        messages: [
+          {
+            role: "system",
+            content:
+              'Extract APMC auction details from the user transcript. Return ONLY valid JSON with keys: {"farmer_name": "string", "commodity_label": "string", "bags": number, "agreed_net_weight_qtl": number, "agreed_rate_per_qtl": number, "authorized_hammali_inr": number}. Convert Devanagari/Marathi/Punjabi digits to standard numbers. If net weight is not explicitly mentioned, compute bags * 0.5.',
+          },
+          {
+            role: "user",
+            content: transcriptText.trim(),
+          },
+        ],
+        temperature: 0.1,
+        max_tokens: 350,
+      }),
+    });
+    const latencyMs = Math.round(performance.now() - t0);
+    if (resp.ok) {
+      const data = await resp.json();
+      const raw = (data.choices?.[0]?.message?.content || "")
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/\s*```$/, "")
+        .trim();
+      const parsed = JSON.parse(raw);
+      return {
+        parsed: {
+          farmer_name: parsed.farmer_name || currentSpoken.farmer_name,
+          commodity_label: parsed.commodity_label || currentSpoken.commodity_label,
+          bags: Number(parsed.bags) > 0 ? Number(parsed.bags) : currentSpoken.bags,
+          agreed_net_weight_qtl:
+            Number(parsed.agreed_net_weight_qtl) > 0
+              ? Number(parsed.agreed_net_weight_qtl)
+              : currentSpoken.agreed_net_weight_qtl,
+          agreed_rate_per_qtl:
+            Number(parsed.agreed_rate_per_qtl) > 0
+              ? Number(parsed.agreed_rate_per_qtl)
+              : currentSpoken.agreed_rate_per_qtl,
+          authorized_hammali_inr:
+            Number(parsed.authorized_hammali_inr) >= 0
+              ? Number(parsed.authorized_hammali_inr)
+              : currentSpoken.authorized_hammali_inr,
+        },
+        latencyMs,
+        liveUsed: true,
+      };
+    }
+  } catch (e) {
+    console.warn("Transcript parse fallback:", e);
+  }
+  return { parsed: null, latencyMs: Math.round(performance.now() - t0), liveUsed: false };
+}
+
+export async function callLiveSarvam105B(spoken, written, audit, fallbackReasoning) {
+  const t0 = performance.now();
+  const dynamicBase = buildDynamicReasoning(spoken, written, audit);
+  const key = resolveRuntimeCredential();
   if (!key) {
-    return { reasoning: fallbackReasoning, latencyMs: 380, liveUsed: false };
+    return { reasoning: dynamicBase, latencyMs: 380, liveUsed: false };
   }
 
   try {
@@ -79,23 +197,23 @@ export async function callLiveSarvam105B(spoken, written, audit, fallbackReasoni
       const parsed = JSON.parse(raw);
       const nativeSummary =
         parsed.farmer_spoken_summary_native ||
-        fallbackReasoning.farmer_spoken_summary_native;
+        dynamicBase.farmer_spoken_summary_native;
 
       return {
         reasoning: {
-          ...fallbackReasoning,
+          ...dynamicBase,
           executive_verdict_title:
             parsed.executive_verdict_title ||
-            fallbackReasoning.executive_verdict_title,
-          legal_summary: parsed.legal_summary || fallbackReasoning.legal_summary,
+            dynamicBase.executive_verdict_title,
+          legal_summary: parsed.legal_summary || dynamicBase.legal_summary,
           statutory_notices:
             Array.isArray(parsed.statutory_notices) &&
             parsed.statutory_notices.length > 0
               ? parsed.statutory_notices
-              : fallbackReasoning.statutory_notices,
+              : dynamicBase.statutory_notices,
           farmer_spoken_summary_native: nativeSummary,
           multilingual_scripts: {
-            ...fallbackReasoning.multilingual_scripts,
+            ...dynamicBase.multilingual_scripts,
             "hi-IN": nativeSummary,
           },
         },
@@ -108,7 +226,7 @@ export async function callLiveSarvam105B(spoken, written, audit, fallbackReasoni
   }
 
   return {
-    reasoning: fallbackReasoning,
+    reasoning: dynamicBase,
     latencyMs: Math.round(performance.now() - t0),
     liveUsed: false,
   };
@@ -166,7 +284,7 @@ export async function callLiveSaarasStt(audioBlob, languageCode = "hi-IN") {
 
   try {
     const form = new FormData();
-    form.append("file", audioBlob, "boli_auction.wav");
+    form.append("file", audioBlob, audioBlob.name || "boli_auction.wav");
     form.append("model", "saaras:v4");
     form.append("mode", "codemix");
     form.append("language_code", languageCode);
@@ -258,7 +376,7 @@ export const MSP_FLOORS = {
 export const PRESET_CASES = {
   sehore_wheat_fraud: {
     case_id: "sehore_wheat_fraud",
-    short_title: "Sehore Mandi (MP) — Sharbati Wheat",
+    short_title: "Preset 1: Sehore Mandi (MP) — Wheat",
     case_title: "Sehore Mandi (MP) — Sharbati Wheat Over-Deduction & Rate Tampering",
     badge_text: "₹5,710.40 Underpaid",
     severity: "CRITICAL_FRAUD",
@@ -388,7 +506,7 @@ export const PRESET_CASES = {
   },
   latur_soybean_msp: {
     case_id: "latur_soybean_msp",
-    short_title: "Latur Mandi (MH) — Yellow Soybean",
+    short_title: "Preset 2: Latur Mandi (MH) — Soybean",
     case_title: "Latur Mandi (MH) — Yellow Soybean MSP Violation & Weighbridge Shortfall",
     badge_text: "₹21,583.00 MSP Breach",
     severity: "HIGH_ALERT_MSP_BREACH",
@@ -518,7 +636,7 @@ export const PRESET_CASES = {
   },
   khanna_paddy_clean: {
     case_id: "khanna_paddy_clean",
-    short_title: "Khanna Mandi (PB) — Paddy PR-126",
+    short_title: "Preset 3: Khanna Mandi (PB) — Paddy",
     case_title: "Khanna Mandi (PB) — Clean Compliant Paddy PR-126 Auction",
     badge_text: "100% Compliant",
     severity: "COMPLIANT",
@@ -627,7 +745,7 @@ export const PRESET_CASES = {
       model_thinking_trace:
         "1. Weight: 50.00 Qtl spoken vs 50.00 Qtl written (Delta = ₹0).\n2. Rate: ₹2,320/Qtl spoken vs ₹2,320/Qtl written (Matches Paddy MSP ₹2,320/Qtl).\n3. Deductions: ₹1,050 cleaning/unloading for 100 bags = ₹10.50/bag (within Punjab Mandi Board cap).\n4. Verdict: 100% COMPLIANT.",
       farmer_spoken_summary_native:
-        "ਕਿਸਾਨ ਵੀਰ ਗੁਰप्रीत ਸਿੰਘ ਜੀ, ਮੰਡੀ-ਪ੍ਰਮਾਣ ਦੀ ਜਾਂਚ ਵਿੱਚ ਤੁਹਾਡੀ ਖੰਨਾ ਮੰਡੀ ਦੀ ਪਰਚੀ ਸੌ ਫੀਸਦੀ ਸਹੀ ਪਾਈ ਗਈ ਹੈ। ਪੰਜਾਹ ਕੁਇੰਟਲ ਝੋਨੇ ਦਾ ਪੂਰਾ ਸਰਕਾਰੀ ਰੇਟ ਦੋ ਹਜ਼ਾਰ ਤਿੰਨ ਸੌ ਵੀਹ ਰੁਪਏ ਪ੍ਰਤੀ ਕੁਇੰਟਲ ਲੱਗਿਆ ਹੈ ਅਤੇ ਕੋਈ ਗੈਰ-ਕਾਨੂੰਨੀ ਕਟੌਤੀ ਨਹੀਂ ਹੋਈ। ਤੁਹਾਡੀ ਇੱਕ ਲੱਖ ਚੌਦਾਂ ਹਜ਼ਾਰ ਨੌਂ ਸੌ ਪੰਜਾਹ ਰੁਪਏ ਦੀ ਪੂਰੀ ਰਕਮ ਤੁਰੰਤ ਭੁਗਤਾਨ ਲਈ ਪ੍ਰਮਾਣਿਤ ਹੈ।",
+        "ਕਿਸਾਨ ਵੀਰ ਗੁਰਪ੍ਰੀਤ ਸਿੰਘ ਜੀ, ਮੰਡੀ-ਪ੍ਰਮਾਣ ਦੀ ਜਾਂਚ ਵਿੱਚ ਤੁਹਾਡੀ ਖੰਨਾ ਮੰਡੀ ਦੀ ਪਰਚੀ ਸੌ ਫੀਸਦੀ ਸਹੀ ਪਾਈ ਗਈ ਹੈ। ਪੰਜਾਹ ਕੁਇੰਟਲ ਝੋਨੇ ਦਾ ਪੂਰਾ ਸਰਕਾਰੀ ਰੇਟ ਦੋ ਹਜ਼ਾਰ ਤਿੰਨ ਸੌ ਵੀਹ ਰੁਪਏ ਪ੍ਰਤੀ ਕੁਇੰਟਲ ਲੱਗਿਆ ਹੈ ਅਤੇ ਕੋਈ ਗੈਰ-ਕਾਨੂੰਨੀ ਕਟੌਤੀ ਨਹੀਂ ਹੋਈ। ਤੁਹਾਡੀ ਇੱਕ ਲੱਖ ਚੌਦਾਂ ਹਜ਼ਾਰ ਨੌਂ ਸੌ ਪੰਜਾਹ ਰੁਪਏ ਦੀ ਪੂਰੀ ਰਕਮ ਤੁਰੰਤ ਭੁਗਤਾਨ ਲਈ ਪ੍ਰਮਾਣਿਤ ਹੈ।",
       multilingual_scripts: {
         "pa-IN":
           "ਕਿਸਾਨ ਵੀਰ ਗੁਰਪ੍ਰੀਤ ਸਿੰਘ ਜੀ, ਮੰਡੀ-ਪ੍ਰਮਾਣ ਦੀ ਜਾਂਚ ਵਿੱਚ ਤੁਹਾਡੀ ਖੰਨਾ ਮੰਡੀ ਦੀ ਪਰਚੀ ਸੌ ਫੀਸਦੀ ਸਹੀ ਪਾਈ ਗਈ ਹੈ। ਪੰਜਾਹ ਕੁਇੰਟਲ ਝੋਨੇ ਦਾ ਪੂਰਾ ਸਰਕਾਰੀ ਰੇਟ ਦੋ ਹਜ਼ਾਰ ਤਿੰਨ ਸੌ ਵੀਹ ਰੁਪਏ ਲੱਗਿਆ ਹੈ। ਤੁਹਾਡੀ ਇੱਕ ਲੱਖ ਚੌਦਾਂ ਹਜ਼ਾਰ ਨੌਂ ਸੌ ਪੰਜਾਹ ਰੁਪਏ ਦੀ ਪੂਰੀ ਰਕਮ ਤੁਰੰਤ ਭੁਗਤਾਨ ਲਈ ਪ੍ਰਮਾਣਿਤ ਹੈ।",
@@ -660,7 +778,12 @@ export function computeStatutoryAudit(spoken, written) {
   const rules = STATE_APMC_RULES[stateCode];
   const mspFloor = MSP_FLOORS[spoken.commodity_code] || 2425.0;
 
-  const expectedNetWeightQtl = Number(((spoken.bags * spoken.bag_weight_kg) / 100.0).toFixed(2));
+  const expectedNetWeightQtl = Number(
+    (Number(spoken.agreed_net_weight_qtl) > 0
+      ? Number(spoken.agreed_net_weight_qtl)
+      : (spoken.bags * spoken.bag_weight_kg) / 100.0
+    ).toFixed(2)
+  );
   const weightShortfallQtl = Number(
     Math.max(0.0, expectedNetWeightQtl - written.recorded_net_weight_qtl).toFixed(2)
   );
