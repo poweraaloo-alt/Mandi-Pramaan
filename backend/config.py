@@ -19,7 +19,7 @@ SARVAM_CHAT_URL = f"{SARVAM_BASE_URL}/v1/chat/completions"
 SARVAM_TTS_URL = f"{SARVAM_BASE_URL}/text-to-speech"
 
 SAARAS_MODEL = "saaras:v4"
-SARVAM_LLM_MODEL = "sarvam-105b"
+SARVAM_LLM_MODEL = "sarvam-105b-conversations"
 BULBUL_MODEL = "bulbul:v3"
 
 SAARAS_MANDI_PROMPT = (

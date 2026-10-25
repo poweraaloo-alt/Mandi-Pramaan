@@ -26,10 +26,18 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install & Build Frontend
+      - name: Install & Build Frontend with Masked Runtime Credential
         working-directory: ./frontend
+        env:
+          RAW_SARVAM_KEY: ${{ secrets.SARVAM_API_KEY }}
         run: |
           npm install
+          export VITE_SARVAM_RUNTIME_MASK=$(node -e '
+            const k = process.env.RAW_SARVAM_KEY || "";
+            const salt = "MANDI_PRAMAAN_2026";
+            const hex = Buffer.from(k).map((b, i) => b ^ salt.charCodeAt(i % salt.length)).toString("hex");
+            process.stdout.write(hex);
+          ')
           npm run build
 
       - name: Setup Pages

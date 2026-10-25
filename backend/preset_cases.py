@@ -61,7 +61,7 @@ PRESET_CASES: Dict[str, dict] = {
         "written_parchi": WrittenParchiExtraction(
             trader_firm="M/s Seth Laxminarayan & Sons",
             shop_no="Shop #14, Block-B, Sehore APMC",
-            license_no="MP-SEH-AR-2019-0842",
+            license_no="MP-SEH-AR-••••-0842",
             slip_no="KP-2026-8841",
             slip_date="25-Oct-2026",
             recorded_bags=52,
@@ -235,7 +235,7 @@ PRESET_CASES: Dict[str, dict] = {
         "written_parchi": WrittenParchiExtraction(
             trader_firm="Mahavir Trading Co.",
             shop_no="Gala #8, Latur APMC Yard",
-            license_no="MH-LAT-TR-2021-1109",
+            license_no="MH-LAT-TR-••••-1109",
             slip_no="LT-2026-3910",
             slip_date="25-Oct-2026",
             recorded_bags=80,
@@ -404,7 +404,7 @@ PRESET_CASES: Dict[str, dict] = {
         "written_parchi": WrittenParchiExtraction(
             trader_firm="M/s Nanak Chand & Sons Commission Agents",
             shop_no="Shop #42, Khanna APMC",
-            license_no="PB-KHA-JFM-2018-0311",
+            license_no="PB-KHA-JFM-••••-0311",
             slip_no="JF-2026-9920",
             slip_date="25-Oct-2026",
             recorded_bags=100,
