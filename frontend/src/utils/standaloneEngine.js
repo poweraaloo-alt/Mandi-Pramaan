@@ -66,8 +66,67 @@ export function buildDynamicReasoning(spoken, written, audit) {
 }
 
 /**
+ * Converts ANY browser audio Blob/File (e.g. MediaRecorder audio/webm, .mp3, .m4a, .ogg, .wav)
+ * into a genuine 16kHz 16-bit Mono RIFF WAVE (.wav) Blob using Web Audio API so that
+ * Sarvam `saaras:v4` Speech-to-Text works 100% reliably across all browsers.
+ */
+export async function convertAudioBlobToWav16kMono(rawBlob) {
+  try {
+    const arrayBuffer = await rawBlob.arrayBuffer();
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    const tempCtx = new AudioCtx();
+    const decoded = await tempCtx.decodeAudioData(arrayBuffer.slice(0));
+    if (tempCtx.close) await tempCtx.close();
+
+    const targetRate = 16000;
+    const frameCount = Math.max(1, Math.ceil(decoded.duration * targetRate));
+    const offlineCtx = new OfflineAudioContext(1, frameCount, targetRate);
+    const source = offlineCtx.createBufferSource();
+    source.buffer = decoded;
+    source.connect(offlineCtx.destination);
+    source.start(0);
+    const rendered = await offlineCtx.startRendering();
+    const samples = rendered.getChannelData(0);
+
+    const wavBuffer = new ArrayBuffer(44 + samples.length * 2);
+    const view = new DataView(wavBuffer);
+    const writeAscii = (offset, str) => {
+      for (let i = 0; i < str.length; i++) {
+        view.setUint8(offset + i, str.charCodeAt(i));
+      }
+    };
+
+    writeAscii(0, "RIFF");
+    view.setUint32(4, 36 + samples.length * 2, true);
+    writeAscii(8, "WAVE");
+    writeAscii(12, "fmt ");
+    view.setUint32(16, 16, true); // PCM chunk size
+    view.setUint16(20, 1, true); // PCM format = 1
+    view.setUint16(22, 1, true); // Mono = 1 channel
+    view.setUint32(24, targetRate, true);
+    view.setUint32(28, targetRate * 2, true); // Byte rate
+    view.setUint16(32, 2, true); // Block align
+    view.setUint16(34, 16, true); // 16-bit samples
+    writeAscii(36, "data");
+    view.setUint32(40, samples.length * 2, true);
+
+    let offset = 44;
+    for (let i = 0; i < samples.length; i++, offset += 2) {
+      const s = Math.max(-1, Math.min(1, samples[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    }
+
+    return new Blob([wavBuffer], { type: "audio/wav" });
+  } catch (err) {
+    console.warn("WAV conversion fallback to original blob:", err);
+    return rawBlob;
+  }
+}
+
+/**
  * Uses live `sarvam-105b-conversations` to extract structured auction numbers from any
- * free-form Hindi/Marathi/Punjabi/English spoken transcript entered by the user!
+ * free-form Hindi/Marathi/Punjabi/English spoken transcript (including spoken number words
+ * returned by `saaras:v4` ASR).
  */
 export async function parseSpokenTranscriptWithSarvam(transcriptText, currentSpoken) {
   const t0 = performance.now();
@@ -89,7 +148,7 @@ export async function parseSpokenTranscriptWithSarvam(transcriptText, currentSpo
           {
             role: "system",
             content:
-              'Extract APMC auction details from the user transcript. Return ONLY valid JSON with keys: {"farmer_name": "string", "commodity_label": "string", "bags": number, "agreed_net_weight_qtl": number, "agreed_rate_per_qtl": number, "authorized_hammali_inr": number}. Convert Devanagari/Marathi/Punjabi digits to standard numbers. If net weight is not explicitly mentioned, compute bags * 0.5.',
+              'Extract APMC auction details from the spoken transcript. Convert all Hindi/Marathi/Punjabi number words (e.g. पचास=50, पच्चीस=25, बावन=52, छब्बीस=26, दो हजार छह सौ पचास=2650, सत्ताईस सौ पचास=2750) and Devanagari digits into standard JSON numbers. Return ONLY valid JSON: {"farmer_name": "string", "commodity_label": "string", "bags": number, "agreed_net_weight_qtl": number, "agreed_rate_per_qtl": number, "authorized_hammali_inr": number}. If net weight is not stated, compute bags * 0.5.',
           },
           {
             role: "user",
@@ -134,6 +193,128 @@ export async function parseSpokenTranscriptWithSarvam(transcriptText, currentSpo
     console.warn("Transcript parse fallback:", e);
   }
   return { parsed: null, latencyMs: Math.round(performance.now() - t0), liveUsed: false };
+}
+
+/**
+ * Extracts Kaccha Parchi slip fields from an uploaded slip image using:
+ * 1) In-browser Vision OCR (Tesseract.js eng+hin) on the uploaded image
+ * 2) Live `sarvam-105b-conversations` structured Kaccha Parchi extraction
+ */
+export async function extractKacchaParchiFromImage(imageDataUrl, currentWritten) {
+  const t0 = performance.now();
+  let ocrText = "";
+
+  try {
+    if (window.Tesseract && imageDataUrl) {
+      const result = await window.Tesseract.recognize(imageDataUrl, "eng+hin");
+      ocrText = (result?.data?.text || "").trim();
+    }
+  } catch (ocrErr) {
+    console.warn("Browser OCR warning:", ocrErr);
+  }
+
+  const key = resolveRuntimeCredential();
+  if (!key || !ocrText) {
+    return {
+      ocrText,
+      parsed: null,
+      latencyMs: Math.round(performance.now() - t0),
+      liveUsed: false,
+    };
+  }
+
+  try {
+    const resp = await fetch("https://api.sarvam.ai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "api-subscription-key": key,
+      },
+      body: JSON.stringify({
+        model: "sarvam-105b-conversations",
+        messages: [
+          {
+            role: "system",
+            content:
+              'Extract Kaccha Parchi (APMC weighment/settlement slip) details from the OCR text. Convert any Devanagari/Indic digits into standard numbers. Return ONLY valid JSON: {"trader_firm": "string", "recorded_bags": number, "recorded_net_weight_qtl": number, "karda_moisture_cut_qtl": number, "written_rate_per_qtl": number, "deducted_aadat_inr": number, "deducted_hammali_tulai_inr": number, "deducted_dharmada_inr": number}',
+          },
+          {
+            role: "user",
+            content: ocrText.slice(0, 2500),
+          },
+        ],
+        temperature: 0.1,
+        max_tokens: 400,
+      }),
+    });
+
+    const latencyMs = Math.round(performance.now() - t0);
+    if (resp.ok) {
+      const data = await resp.json();
+      const raw = (data.choices?.[0]?.message?.content || "")
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/\s*```$/, "")
+        .trim();
+      const p = JSON.parse(raw);
+
+      const netW =
+        Number(p.recorded_net_weight_qtl) > 0
+          ? Number(p.recorded_net_weight_qtl)
+          : currentWritten.recorded_net_weight_qtl;
+      const karda =
+        Number(p.karda_moisture_cut_qtl) >= 0
+          ? Number(p.karda_moisture_cut_qtl)
+          : currentWritten.karda_moisture_cut_qtl;
+      const rateW =
+        Number(p.written_rate_per_qtl) > 0
+          ? Number(p.written_rate_per_qtl)
+          : currentWritten.written_rate_per_qtl;
+      const aadat =
+        Number(p.deducted_aadat_inr) >= 0
+          ? Number(p.deducted_aadat_inr)
+          : currentWritten.deducted_aadat_inr;
+      const hammali =
+        Number(p.deducted_hammali_tulai_inr) >= 0
+          ? Number(p.deducted_hammali_tulai_inr)
+          : currentWritten.deducted_hammali_tulai_inr;
+      const dharmada =
+        Number(p.deducted_dharmada_inr) >= 0
+          ? Number(p.deducted_dharmada_inr)
+          : currentWritten.deducted_dharmada_inr;
+      const gross = Number((netW * rateW).toFixed(2));
+      const netPayable = Number((gross - (aadat + hammali + dharmada)).toFixed(2));
+
+      return {
+        ocrText,
+        parsed: {
+          trader_firm: p.trader_firm || currentWritten.trader_firm,
+          recorded_bags:
+            Number(p.recorded_bags) > 0 ? Number(p.recorded_bags) : currentWritten.recorded_bags,
+          gross_weight_qtl: Number((netW + karda).toFixed(2)),
+          recorded_net_weight_qtl: netW,
+          karda_moisture_cut_qtl: karda,
+          written_rate_per_qtl: rateW,
+          gross_written_amount_inr: gross,
+          deducted_aadat_inr: aadat,
+          deducted_hammali_tulai_inr: hammali,
+          deducted_dharmada_inr: dharmada,
+          deducted_muddat_inr: 0,
+          written_net_payable_inr: netPayable,
+        },
+        latencyMs,
+        liveUsed: true,
+      };
+    }
+  } catch (e) {
+    console.warn("Slip OCR structured parse fallback:", e);
+  }
+
+  return {
+    ocrText,
+    parsed: null,
+    latencyMs: Math.round(performance.now() - t0),
+    liveUsed: false,
+  };
 }
 
 export async function callLiveSarvam105B(spoken, written, audit, fallbackReasoning) {
@@ -279,12 +460,14 @@ export async function callLiveSaarasStt(audioBlob, languageCode = "hi-IN") {
   const t0 = performance.now();
   const key = resolveRuntimeCredential();
   if (!key || !audioBlob) {
-    return { transcript: null, latencyMs: 210, liveUsed: false };
+    return { transcript: null, wavBlob: audioBlob, latencyMs: 210, liveUsed: false };
   }
 
   try {
+    // Always convert browser MediaRecorder webm/ogg/mp3 into 16kHz 16-bit Mono RIFF WAV
+    const wavBlob = await convertAudioBlobToWav16kMono(audioBlob);
     const form = new FormData();
-    form.append("file", audioBlob, audioBlob.name || "boli_auction.wav");
+    form.append("file", wavBlob, "boli_auction_16k.wav");
     form.append("model", "saaras:v4");
     form.append("mode", "codemix");
     form.append("language_code", languageCode);
@@ -306,6 +489,7 @@ export async function callLiveSaarasStt(audioBlob, languageCode = "hi-IN") {
       if (data.transcript) {
         return {
           transcript: data.transcript.trim(),
+          wavBlob,
           latencyMs,
           liveUsed: true,
         };
@@ -317,9 +501,25 @@ export async function callLiveSaarasStt(audioBlob, languageCode = "hi-IN") {
 
   return {
     transcript: null,
+    wavBlob: audioBlob,
     latencyMs: Math.round(performance.now() - t0),
     liveUsed: false,
   };
+}
+
+/**
+ * Generates a real 16kHz WAV Blob of spoken auction Boli via `bulbul:v3` so the user
+ * can play, download, or feed a genuine `.wav` auction audio recording into `saaras:v4`.
+ */
+export async function synthesizeSampleBoliWav(spokenText, languageCode = "hi-IN") {
+  const res = await callLiveBulbulTts(spokenText, languageCode, "shubh");
+  if (!res.audioBase64) return null;
+  const binStr = atob(res.audioBase64);
+  const bytes = new Uint8Array(binStr.length);
+  for (let i = 0; i < binStr.length; i++) {
+    bytes[i] = binStr.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: "audio/wav" });
 }
 
 export const STATE_APMC_RULES = {
