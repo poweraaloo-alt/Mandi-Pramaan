@@ -76,22 +76,12 @@ async def extract_parchi_vision(
     Fast Hybrid Vision Pipeline:
     Computes region-of-interest extraction + optional Sarvam Vision / doc_ai verification.
     """
+    # NOTE: Live Sarvam Vision / doc_ai OCR is not wired up yet. The structured slip
+    # fields come from the provided extraction (preset or user-edited), so this stage
+    # never reports itself as a live API call.
     t0 = time.perf_counter()
-    api_key = get_api_key(api_key_override)
-    live_used = False
-
-    if api_key and image_bytes and use_doc_ai_batch:
-        try:
-            from sarvamai import SarvamAI
-
-            sdk_client = SarvamAI(api_subscription_key=api_key)
-            if hasattr(sdk_client, "doc_ai"):
-                live_used = True
-        except Exception:
-            live_used = False
-
     elapsed_ms = max(290, int((time.perf_counter() - t0) * 1000))
-    return written_parchi, elapsed_ms, live_used
+    return written_parchi, elapsed_ms, False
 
 
 def _strip_json_fences(raw_text: str) -> str:
@@ -167,7 +157,7 @@ async def run_sarvam_105b_arbitration(
         '  "executive_verdict_title": "string",\n'
         '  "legal_summary": "string (2-3 sentences citing exact rupee amounts and APMC sections)",\n'
         '  "statutory_notices": ["string", "string", "string"],\n'
-        '  "farmer_spoken_summary_native": "string strictly in native Devanagari script (NO Latin/Roman letters or digits) summarizing the audit for the farmer in 2-3 sentences"\n'
+        '  "farmer_spoken_summary_native": "Hindi summary in Devanagari script (2-3 sentences for the farmer)"\n'
         "}"
     )
 
@@ -178,11 +168,11 @@ async def run_sarvam_105b_arbitration(
             {"role": "user", "content": json.dumps(case_context, ensure_ascii=False)},
         ],
         "temperature": 0.1,
-        "max_tokens": 900,
+        "max_tokens": 1024,
     }
 
     try:
-        async with httpx.AsyncClient(timeout=22.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 SARVAM_CHAT_URL,
                 headers={

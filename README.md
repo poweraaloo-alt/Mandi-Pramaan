@@ -26,7 +26,30 @@ In Indian APMC agricultural markets (*Mandis*), open-outcry verbal auctions (*Bo
 
 ---
 
-## Quick Start
+## Quick Start (Streamlit UI — recommended)
+
+```bash
+pip install -r requirements.txt
+streamlit run streamlit_app.py
+```
+Open **`http://localhost:8501`**. Put `SARVAM_API_KEY=...` in `.env` to enable the live Sarvam-105B review and Bulbul v3 voice buttons; without a key the app still runs using the built-in rule engine.
+
+> Note: the slip-reading (Sarvam Vision) stage is not wired to a live API yet. The slip values come from the sample cases or from the "Try your own numbers" editor.
+
+### Deploy on Streamlit Community Cloud
+1. Go to [share.streamlit.io](https://share.streamlit.io) → **New app** → pick this repo, branch `main`, file `streamlit_app.py`.
+2. Under **Advanced settings → Secrets**, add: `SARVAM_API_KEY = "your_key"`.
+3. Deploy.
+
+### Deploy with Docker (Render, Railway, Cloud Run, any VPS)
+```bash
+docker build -t mandi-pramaan .
+docker run -p 8501:8501 -e SARVAM_API_KEY=your_key mandi-pramaan
+```
+
+---
+
+## Alternative: FastAPI + React UI
 
 ### 1. Backend (FastAPI on Port `8000`)
 ```bash
