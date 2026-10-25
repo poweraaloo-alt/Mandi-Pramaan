@@ -1,15 +1,27 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
+  Activity,
   AlertTriangle,
+  Award,
   Check,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Clock,
   Copy,
+  Cpu,
   Download,
+  Eye,
   FileText,
+  Gavel,
+  GitBranch,
+  Globe,
   KeyRound,
+  Layers,
+  Lock,
+  Mic,
   Play,
+  QrCode,
   RotateCcw,
   Scale,
   ShieldCheck,
@@ -29,29 +41,29 @@ import {
 } from "./utils/standaloneEngine";
 
 const LANGUAGES = [
-  { code: "hi-IN", label: "हिंदी Hindi", speaker: "shubh" },
-  { code: "mr-IN", label: "मराठी Marathi", speaker: "aditya" },
-  { code: "pa-IN", label: "ਪੰਜਾਬੀ Punjabi", speaker: "shubh" },
-  { code: "ta-IN", label: "தமிழ் Tamil", speaker: "ritu" },
-  { code: "te-IN", label: "తెలుగు Telugu", speaker: "aditya" },
+  { code: "hi-IN", label: "हिंदी (Hindi)", speaker: "shubh" },
+  { code: "mr-IN", label: "मराठी (Marathi)", speaker: "aditya" },
+  { code: "pa-IN", label: "ਪੰਜਾਬੀ (Punjabi)", speaker: "shubh" },
+  { code: "ta-IN", label: "தமிழ் (Tamil)", speaker: "ritu" },
+  { code: "te-IN", label: "తెలుగు (Telugu)", speaker: "aditya" },
 ];
 
 const STATUS_BADGE = {
   CRITICAL_VIOLATION: {
-    label: "Violation",
+    label: "STATUTORY VIOLATION",
     cls: "bg-red-100 text-red-800 border-red-300",
   },
   MSP_BREACH: {
-    label: "Below MSP",
+    label: "BELOW MSP FLOOR",
     cls: "bg-orange-100 text-orange-800 border-orange-300",
   },
   COMPLIANT: {
-    label: "OK",
+    label: "VERIFIED COMPLIANT",
     cls: "bg-emerald-100 text-emerald-800 border-emerald-300",
   },
 };
 
-function DeterministicQrSvg({ payload, size = 180 }) {
+function DeterministicQrSvg({ payload, size = 148 }) {
   const cells = 21;
   const grid = Array.from({ length: cells }, () => Array(cells).fill(false));
   const drawFinder = (r0, c0) => {
@@ -87,7 +99,7 @@ function DeterministicQrSvg({ payload, size = 180 }) {
       width={size}
       height={size}
       viewBox={`0 0 ${size} ${size}`}
-      className="rounded-xl bg-white p-2 border border-stone-300 shadow-sm"
+      className="rounded-xl bg-white p-2 border border-slate-200 shadow-sm"
     >
       {grid.map((row, rIdx) =>
         row.map((filled, cIdx) =>
@@ -98,7 +110,7 @@ function DeterministicQrSvg({ payload, size = 180 }) {
               y={rIdx * cellSize}
               width={cellSize + 0.35}
               height={cellSize + 0.35}
-              fill="#1F2937"
+              fill="#0F172A"
             />
           ) : null
         )
@@ -116,17 +128,17 @@ export default function App() {
     structuredClone(PRESET_CASES.sehore_wheat_fraud.written_parchi)
   );
   const [stateCode, setStateCode] = useState("MP");
-  const [activeTab, setActiveTab] = useState("findings");
   const [showEditor, setShowEditor] = useState(false);
   const [showThinking, setShowThinking] = useState(false);
+  const [showKeyModal, setShowKeyModal] = useState(false);
   const [activeFieldId, setActiveFieldId] = useState(null);
   const [parchiImageUrl, setParchiImageUrl] = useState("");
   const [merkle, setMerkle] = useState(null);
 
-  // Voice & Sarvam API state
   const [apiKey, setApiKey] = useState(
     () => localStorage.getItem("MANDI_SARVAM_API_KEY") || ""
   );
+  const [draftKey, setDraftKey] = useState(apiKey);
   const [selectedLang, setSelectedLang] = useState("hi-IN");
   const [isPlaying, setIsPlaying] = useState(false);
   const [isCallingAi, setIsCallingAi] = useState(false);
@@ -141,7 +153,6 @@ export default function App() {
     audit.comparison_rows.map((r) => [r.field_id, r.status])
   );
 
-  // Update handwritten Kaccha Parchi image & SHA-256 Merkle anchor whenever inputs change
   useEffect(() => {
     const url = generateKacchaParchiDataUrl(written, spoken);
     setParchiImageUrl(url);
@@ -170,6 +181,7 @@ export default function App() {
     setApiKey(val);
     if (val) localStorage.setItem("MANDI_SARVAM_API_KEY", val);
     else localStorage.removeItem("MANDI_SARVAM_API_KEY");
+    setShowKeyModal(false);
   };
 
   const updateSlipNumbers = (patchSpoken, patchWritten) => {
@@ -197,18 +209,16 @@ export default function App() {
     setWritten(nextWritten);
   };
 
-  // Optional live Sarvam-105B review
   const handleAskSarvam105B = async () => {
     setIsCallingAi(true);
     try {
-      // Try backend /api/arbitrate first if running locally, otherwise call Sarvam REST API directly
-      const headers = { "Content-Type": "application/json" };
-      if (apiKey) headers["api-subscription-key"] = apiKey;
-
       if (apiKey) {
         const resp = await fetch("https://api.sarvam.ai/v1/chat/completions", {
           method: "POST",
-          headers,
+          headers: {
+            "Content-Type": "application/json",
+            "api-subscription-key": apiKey.trim(),
+          },
           body: JSON.stringify({
             model: "sarvam-105b",
             messages: [
@@ -264,7 +274,6 @@ export default function App() {
     }
   };
 
-  // Play voice in selected language (Bulbul v3 if API key set, or instant browser Indic TTS)
   const handleSpeakVoice = async (langCode = selectedLang) => {
     if (isPlaying && stopAudioRef.current) {
       stopAudioRef.current();
@@ -321,86 +330,60 @@ export default function App() {
     reasoning.farmer_spoken_summary_native;
 
   return (
-    <div className="min-h-screen flex flex-col lg:flex-row bg-[#FFFBF5] text-stone-900">
+    <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-slate-900">
       {/* =================================================================== */}
-      {/* LEFT SIDEBAR (Streamlit-Style Control Panel)                        */}
+      {/* TOP WEBSITE NAVBAR                                                  */}
       {/* =================================================================== */}
-      <aside className="w-full lg:w-80 shrink-0 bg-[#F5EFE6] border-b lg:border-b-0 lg:border-r border-stone-300/80 p-6 flex flex-col justify-between gap-6">
-        <div className="space-y-6">
-          {/* Brand Title */}
-          <div>
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-amber-700 text-white flex items-center justify-center shadow-sm">
-                <Scale className="w-5 h-5" />
-              </div>
-              <div>
-                <h1 className="text-xl font-extrabold tracking-tight text-stone-900">
-                  Mandi-Pramaan
-                </h1>
-                <p className="text-xs font-semibold text-amber-800">
-                  मंडी-प्रमाण · APMC Slip Verifier
-                </p>
-              </div>
+      <header className="sticky top-0 z-30 bg-slate-900 text-white border-b border-slate-800 shadow-md">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-md">
+              <Scale className="w-5 h-5 text-slate-950 stroke-[2.5]" />
             </div>
-            <p className="text-sm text-stone-600 mt-2 leading-relaxed">
-              Check a handwritten mandi slip (<em>Kaccha Parchi</em>) against the spoken
-              auction deal and State APMC rules.
-            </p>
-          </div>
-
-          {/* Sample Case Selector */}
-          <div className="space-y-2">
-            <label className="block text-xs font-bold uppercase tracking-wider text-stone-600">
-              1. Choose Sample Case
-            </label>
-            <div className="space-y-2">
-              {Object.values(PRESET_CASES).map((item) => {
-                const active = presetId === item.case_id;
-                const isClean = item.severity === "COMPLIANT";
-                return (
-                  <button
-                    key={item.case_id}
-                    onClick={() => handleSelectPreset(item.case_id)}
-                    className={`w-full text-left p-3 rounded-xl border transition cursor-pointer ${
-                      active
-                        ? "bg-white border-amber-700 shadow-sm ring-2 ring-amber-700/20"
-                        : "bg-stone-100/70 border-stone-300 hover:bg-white"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-1 mb-1">
-                      <span
-                        className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
-                          isClean
-                            ? "bg-emerald-100 text-emerald-800 border-emerald-300"
-                            : "bg-red-100 text-red-800 border-red-300"
-                        }`}
-                      >
-                        {item.badge_text}
-                      </span>
-                      {active && (
-                        <span className="text-[11px] font-bold text-amber-800">
-                          ● Selected
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-sm font-bold text-stone-900">
-                      {item.short_title}
-                    </div>
-                  </button>
-                );
-              })}
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-lg font-extrabold tracking-tight">
+                  MANDI-PRAMAAN
+                </span>
+                <span className="text-amber-400 font-bold text-base">
+                  (मंडी-प्रमाण)
+                </span>
+                <span className="hidden md:inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  Sarvam Sovereign Stack
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">
+                Multimodal APMC Agricultural Auction &amp; Kaccha Parchi Arbitrator
+              </p>
             </div>
           </div>
 
-          {/* State APMC Law Selector */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold uppercase tracking-wider text-stone-600">
-              2. State APMC Law to Apply
-            </label>
+          {/* Pipeline Badges */}
+          <div className="hidden xl:flex items-center gap-2 text-xs font-mono bg-slate-950/80 border border-slate-800 rounded-xl px-3 py-1.5">
+            <span className="flex items-center gap-1 text-sky-400">
+              <Mic className="w-3.5 h-3.5" /> Saaras v4
+            </span>
+            <span className="text-slate-600">→</span>
+            <span className="flex items-center gap-1 text-amber-400">
+              <Eye className="w-3.5 h-3.5" /> Sarvam Vision
+            </span>
+            <span className="text-slate-600">→</span>
+            <span className="flex items-center gap-1 text-purple-400">
+              <Cpu className="w-3.5 h-3.5" /> Sarvam-105B
+            </span>
+            <span className="text-slate-600">→</span>
+            <span className="flex items-center gap-1 text-emerald-400">
+              <Volume2 className="w-3.5 h-3.5" /> Bulbul v3
+            </span>
+          </div>
+
+          {/* Right Controls */}
+          <div className="flex items-center gap-2.5">
             <select
               value={stateCode}
               onChange={(e) => setStateCode(e.target.value)}
-              className="w-full rounded-xl bg-white border border-stone-300 px-3 py-2.5 text-sm font-semibold text-stone-900 shadow-xs focus:outline-none focus:border-amber-700"
+              className="rounded-lg bg-slate-800 border border-slate-700 text-amber-300 text-xs font-semibold px-3 py-2 focus:outline-none focus:border-amber-400"
             >
               {Object.entries(STATE_APMC_RULES).map(([code, info]) => (
                 <option key={code} value={code}>
@@ -408,448 +391,320 @@ export default function App() {
                 </option>
               ))}
             </select>
-          </div>
 
-          {/* Optional Sarvam AI Key Input */}
-          <div className="space-y-1.5 pt-2 border-t border-stone-300/80">
-            <label className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-stone-600">
-              <KeyRound className="w-3.5 h-3.5 text-amber-700" />
-              <span>Sarvam AI API Key (Optional)</span>
-            </label>
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => handleSaveKey(e.target.value)}
-              placeholder="sk_... (for live 105B & Bulbul v3)"
-              className="w-full rounded-xl bg-white border border-stone-300 px-3 py-2 text-xs font-mono text-stone-900 focus:outline-none focus:border-amber-700"
-            />
-            <p className="text-xs text-stone-600">
-              {apiKey
-                ? "✅ Live Sarvam AI key active in browser."
-                : "Works offline out-of-the-box. Paste a key to enable live Sarvam-105B & Bulbul v3 calls."}
-            </p>
-          </div>
-        </div>
-
-        {/* Pipeline Footer Note */}
-        <div className="text-xs text-stone-600 border-t border-stone-300/80 pt-4 leading-relaxed">
-          <strong className="text-stone-800">Sarvam Sovereign Stack:</strong> Saaras v4
-          (Speech) → Sarvam Vision (Slip) → APMC Rule Engine + Sarvam-105B → Bulbul v3
-          (Voice) → SHA-256 Receipt
-        </div>
-      </aside>
-
-      {/* =================================================================== */}
-      {/* MAIN WORKSPACE (Clean, High-Contrast Streamlit Layout)              */}
-      {/* =================================================================== */}
-      <main className="flex-1 max-w-5xl mx-auto w-full px-5 sm:px-8 py-7 space-y-6">
-        {/* Title & Subtitle */}
-        <div>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-stone-900 tracking-tight">
-            Mandi-Pramaan{" "}
-            <span className="text-amber-700 font-bold">मंडी-प्रमाण</span>
-          </h2>
-          <p className="text-base text-stone-600 mt-1">
-            {spoken.mandi_name} · <strong>{spoken.commodity_label}</strong> · Farmer:{" "}
-            <strong>{spoken.farmer_name}</strong>
-          </p>
-        </div>
-
-        {/* Verdict Banner */}
-        {underpaid > 0 ? (
-          <div className="rounded-2xl bg-red-50 border-2 border-red-300 p-5 text-red-950 shadow-xs">
-            <div className="flex items-center gap-2.5">
-              <AlertTriangle className="w-6 h-6 text-red-700 shrink-0" />
-              <h3 className="text-xl font-extrabold text-red-900">
-                Farmer underpaid by {formatINR(underpaid)}
-              </h3>
-            </div>
-            <p className="text-base text-red-900/90 mt-1.5 leading-relaxed">
-              <strong>{audit.violation_count} statutory problem(s)</strong> detected under
-              the <strong>{audit.state_act_name}</strong>.
-            </p>
-          </div>
-        ) : (
-          <div className="rounded-2xl bg-emerald-50 border-2 border-emerald-300 p-5 text-emerald-950 shadow-xs">
-            <div className="flex items-center gap-2.5">
-              <CheckCircle2 className="w-6 h-6 text-emerald-700 shrink-0" />
-              <h3 className="text-xl font-extrabold text-emerald-900">
-                Slip is 100% compliant
-              </h3>
-            </div>
-            <p className="text-base text-emerald-900/90 mt-1.5 leading-relaxed">
-              The written slip matches the spoken auction deal and satisfies the{" "}
-              <strong>{audit.state_act_name}</strong>.
-            </p>
-          </div>
-        )}
-
-        {/* 4 Key Metric Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
-          <div className="bg-white border border-stone-200 rounded-2xl p-4 shadow-xs">
-            <div className="text-xs font-bold uppercase tracking-wider text-stone-500">
-              Farmer Should Receive
-            </div>
-            <div className="text-2xl font-extrabold text-emerald-800 mt-1">
-              {formatINR(audit.lawful_net_payable_inr)}
-            </div>
-          </div>
-
-          <div className="bg-white border border-stone-200 rounded-2xl p-4 shadow-xs">
-            <div className="text-xs font-bold uppercase tracking-wider text-stone-500">
-              Slip Says
-            </div>
-            <div className="text-2xl font-extrabold text-stone-800 mt-1">
-              {formatINR(audit.written_net_payable_inr)}
-            </div>
-          </div>
-
-          <div className="bg-white border border-stone-200 rounded-2xl p-4 shadow-xs">
-            <div className="text-xs font-bold uppercase tracking-wider text-stone-500">
-              Underpaid By
-            </div>
-            <div
-              className={`text-2xl font-extrabold mt-1 ${
-                underpaid > 0 ? "text-red-700" : "text-emerald-700"
-              }`}
-            >
-              {formatINR(underpaid)}
-            </div>
-          </div>
-
-          <div className="bg-white border border-stone-200 rounded-2xl p-4 shadow-xs">
-            <div className="text-xs font-bold uppercase tracking-wider text-stone-500">
-              Problems Found
-            </div>
-            <div className="text-2xl font-extrabold text-stone-900 mt-1">
-              {audit.violation_count}
-            </div>
-          </div>
-        </div>
-
-        {/* Collapsible Editor: Try Your Own Numbers */}
-        <div className="bg-white border border-stone-300 rounded-2xl overflow-hidden shadow-xs">
-          <button
-            type="button"
-            onClick={() => setShowEditor(!showEditor)}
-            className="w-full px-5 py-3.5 flex items-center justify-between text-left text-sm font-bold text-stone-800 hover:bg-stone-50 transition cursor-pointer"
-          >
-            <span className="flex items-center gap-2">
-              <Sliders className="w-4 h-4 text-amber-700" />
-              <span>
-                ✏️ Try your own numbers — edit the auction deal or slip and re-check
-                instantly
-              </span>
-            </span>
-            {showEditor ? (
-              <ChevronUp className="w-4 h-4 text-stone-500" />
-            ) : (
-              <ChevronDown className="w-4 h-4 text-stone-500" />
-            )}
-          </button>
-
-          {showEditor && (
-            <div className="p-5 border-t border-stone-200 bg-stone-50/60 space-y-4">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-                <div>
-                  <label className="block text-xs font-semibold text-stone-600 mb-1">
-                    Bags (50 kg each)
-                  </label>
-                  <input
-                    type="number"
-                    value={spoken.bags}
-                    onChange={(e) =>
-                      updateSlipNumbers({ bags: Number(e.target.value) }, {})
-                    }
-                    className="w-full rounded-lg bg-white border border-stone-300 px-3 py-2 font-semibold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-stone-600 mb-1">
-                    Spoken Auction Rate (₹/Qtl)
-                  </label>
-                  <input
-                    type="number"
-                    value={spoken.agreed_rate_per_qtl}
-                    onChange={(e) =>
-                      updateSlipNumbers(
-                        { agreed_rate_per_qtl: Number(e.target.value) },
-                        {}
-                      )
-                    }
-                    className="w-full rounded-lg bg-white border border-stone-300 px-3 py-2 font-semibold text-emerald-800"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-stone-600 mb-1">
-                    Slip Net Weight (Qtl)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={written.recorded_net_weight_qtl}
-                    onChange={(e) =>
-                      updateSlipNumbers(
-                        {},
-                        { recorded_net_weight_qtl: Number(e.target.value) }
-                      )
-                    }
-                    className="w-full rounded-lg bg-white border border-stone-300 px-3 py-2 font-semibold text-red-800"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-stone-600 mb-1">
-                    Slip Written Rate (₹/Qtl)
-                  </label>
-                  <input
-                    type="number"
-                    value={written.written_rate_per_qtl}
-                    onChange={(e) =>
-                      updateSlipNumbers(
-                        {},
-                        { written_rate_per_qtl: Number(e.target.value) }
-                      )
-                    }
-                    className="w-full rounded-lg bg-white border border-stone-300 px-3 py-2 font-semibold text-red-800"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-stone-600 mb-1">
-                    Deducted Aadat (₹)
-                  </label>
-                  <input
-                    type="number"
-                    value={written.deducted_aadat_inr}
-                    onChange={(e) =>
-                      updateSlipNumbers(
-                        {},
-                        { deducted_aadat_inr: Number(e.target.value) }
-                      )
-                    }
-                    className="w-full rounded-lg bg-white border border-stone-300 px-3 py-2 font-semibold text-red-800"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-stone-600 mb-1">
-                    Hammali / Labor (₹)
-                  </label>
-                  <input
-                    type="number"
-                    value={written.deducted_hammali_tulai_inr}
-                    onChange={(e) =>
-                      updateSlipNumbers(
-                        {},
-                        { deducted_hammali_tulai_inr: Number(e.target.value) }
-                      )
-                    }
-                    className="w-full rounded-lg bg-white border border-stone-300 px-3 py-2 font-semibold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-stone-600 mb-1">
-                    Dharmada Cut (₹)
-                  </label>
-                  <input
-                    type="number"
-                    value={written.deducted_dharmada_inr}
-                    onChange={(e) =>
-                      updateSlipNumbers(
-                        {},
-                        { deducted_dharmada_inr: Number(e.target.value) }
-                      )
-                    }
-                    className="w-full rounded-lg bg-white border border-stone-300 px-3 py-2 font-semibold text-red-800"
-                  />
-                </div>
-                <div className="flex items-end">
-                  <button
-                    type="button"
-                    onClick={() => handleSelectPreset(presetId)}
-                    className="w-full flex items-center justify-center gap-1.5 rounded-lg bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold text-xs py-2.5 px-3 cursor-pointer transition"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>Reset Sample</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* ================================================================= */}
-        {/* 4 CLEAN TABS                                                      */}
-        {/* ================================================================= */}
-        <div className="border-b border-stone-300 flex flex-wrap gap-2">
-          {[
-            { id: "findings", label: "📋 Findings & APMC Law" },
-            { id: "evidence", label: "🧾 Slip & Audio Evidence" },
-            { id: "voice", label: "🔊 Farmer Voice Message" },
-            { id: "proof", label: "🔐 Proof Receipt & QR" },
-          ].map((t) => (
             <button
-              key={t.id}
-              onClick={() => setActiveTab(t.id)}
-              className={`px-4 py-2.5 text-sm font-bold rounded-t-xl border-b-2 transition cursor-pointer ${
-                activeTab === t.id
-                  ? "border-amber-700 text-amber-900 bg-amber-100/60"
-                  : "border-transparent text-stone-600 hover:text-stone-900 hover:bg-stone-100"
-              }`}
+              type="button"
+              onClick={() => {
+                setDraftKey(apiKey);
+                setShowKeyModal(true);
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 transition cursor-pointer"
             >
-              {t.label}
+              <KeyRound className="w-3.5 h-3.5" />
+              <span>{apiKey ? "API Key Active" : "Sarvam API Key"}</span>
             </button>
-          ))}
+          </div>
         </div>
+      </header>
 
-        {/* TAB 1: FINDINGS */}
-        {activeTab === "findings" && (
-          <div className="space-y-4">
-            {audit.comparison_rows.map((row) => {
-              const badge = STATUS_BADGE[row.status] || STATUS_BADGE.COMPLIANT;
+      {/* =================================================================== */}
+      {/* MAIN DASHBOARD CONTAINER                                            */}
+      {/* =================================================================== */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
+        {/* 1. CASE SELECTOR CARDS */}
+        <section className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Select Live APMC Auction Case Preset
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowEditor(!showEditor)}
+              className="flex items-center gap-1.5 text-xs font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-300 px-3 py-1.5 rounded-lg cursor-pointer transition"
+            >
+              <Sliders className="w-3.5 h-3.5" />
+              <span>
+                {showEditor
+                  ? "Hide Custom Number Simulator"
+                  : "✏️ Edit Auction / Slip Numbers Live"}
+              </span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+            {Object.values(PRESET_CASES).map((item) => {
+              const active = presetId === item.case_id;
+              const isClean = item.severity === "COMPLIANT";
               return (
-                <div
-                  key={row.field_id}
-                  className="bg-white border border-stone-200 rounded-2xl p-5 shadow-xs space-y-3"
+                <button
+                  key={item.case_id}
+                  onClick={() => handleSelectPreset(item.case_id)}
+                  className={`text-left p-4 rounded-2xl border-2 transition cursor-pointer bg-white shadow-xs ${
+                    active
+                      ? "border-amber-600 ring-4 ring-amber-500/15"
+                      : "border-slate-200 hover:border-slate-300"
+                  }`}
                 >
-                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
-                    <div className="md:col-span-3">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-base font-extrabold text-stone-900">
-                          {row.parameter}
-                        </span>
-                        <span
-                          className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${badge.cls}`}
-                        >
-                          {badge.label}
-                        </span>
-                      </div>
-                      <span className="inline-block mt-1 text-xs font-mono text-stone-500">
-                        Audio [{row.spoken_timestamp}]
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <span
+                      className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-0.5 rounded-full border ${
+                        isClean
+                          ? "bg-emerald-50 text-emerald-800 border-emerald-300"
+                          : "bg-red-50 text-red-800 border-red-300"
+                      }`}
+                    >
+                      {isClean ? (
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                      ) : (
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                      )}
+                      {item.badge_text}
+                    </span>
+                    {active && (
+                      <span className="text-xs font-extrabold text-amber-700">
+                        ● ACTIVE CASE
                       </span>
-                    </div>
-
-                    <div className="md:col-span-3">
-                      <div className="text-xs font-bold uppercase tracking-wider text-stone-500">
-                        Said at Auction
-                      </div>
-                      <div className="text-base font-semibold text-stone-900 mt-0.5">
-                        {row.spoken_fact}
-                      </div>
-                    </div>
-
-                    <div className="md:col-span-4">
-                      <div className="text-xs font-bold uppercase tracking-wider text-stone-500">
-                        Written on Slip
-                      </div>
-                      <div className="text-base font-semibold text-stone-900 mt-0.5">
-                        {row.written_fact}
-                      </div>
-                    </div>
-
-                    <div className="md:col-span-2 md:text-right">
-                      <div className="text-xs font-bold uppercase tracking-wider text-stone-500">
-                        Farmer Loss
-                      </div>
-                      <div
-                        className={`text-xl font-extrabold mt-0.5 ${
-                          row.delta_inr > 0 ? "text-red-700" : "text-emerald-700"
-                        }`}
-                      >
-                        {row.delta_inr > 0 ? `−${formatINR(row.delta_inr)}` : "₹0"}
-                      </div>
-                    </div>
+                    )}
                   </div>
-
-                  <div className="pt-2 border-t border-stone-100 text-sm text-stone-700 space-y-1">
-                    <div>
-                      <strong className="text-stone-900">Finding:</strong>{" "}
-                      {row.legal_hypothesis}
-                    </div>
-                    <div className="text-xs text-stone-600">
-                      ⚖️ <strong>{row.bylaw_citation}</strong> · ➡️{" "}
-                      {row.enforcement_action}
-                    </div>
+                  <div className="text-base font-extrabold text-slate-900">
+                    {item.short_title}
                   </div>
-                </div>
+                  <div className="text-xs text-slate-500 mt-1">
+                    Farmer: {item.spoken_deal.farmer_name} ·{" "}
+                    {item.spoken_deal.bags} Bags ({item.spoken_deal.agreed_net_weight_qtl}{" "}
+                    Qtl)
+                  </div>
+                </button>
               );
             })}
-
-            {/* Legal Summary Card */}
-            <div className="bg-white border border-stone-300 rounded-2xl p-5 shadow-xs space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-lg font-extrabold text-stone-900">
-                  Legal Summary &amp; Statutory Notices
-                </h3>
-                {apiKey && (
-                  <button
-                    type="button"
-                    onClick={handleAskSarvam105B}
-                    disabled={isCallingAi}
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-700 hover:bg-amber-800 text-white text-xs font-bold cursor-pointer transition"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>
-                      {isCallingAi
-                        ? "Sarvam-105B Reviewing..."
-                        : "Ask Sarvam-105B to Review"}
-                    </span>
-                  </button>
-                )}
-              </div>
-
-              <p className="text-base font-bold text-amber-900">
-                {reasoning.executive_verdict_title}
-              </p>
-              <p className="text-base text-stone-700 leading-relaxed">
-                {reasoning.legal_summary}
-              </p>
-
-              <ul className="list-disc list-inside space-y-1 text-sm text-stone-700 pt-1">
-                {(reasoning.statutory_notices || []).map((n, i) => (
-                  <li key={i}>{n}</li>
-                ))}
-              </ul>
-
-              {reasoning.model_thinking_trace && (
-                <div className="pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowThinking(!showThinking)}
-                    className="text-xs font-bold text-amber-800 hover:underline flex items-center gap-1 cursor-pointer"
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    <span>
-                      {showThinking
-                        ? "Hide step-by-step audit trace"
-                        : "Show step-by-step audit trace"}
-                    </span>
-                  </button>
-                  {showThinking && (
-                    <pre className="mt-2 p-3.5 rounded-xl bg-stone-100 border border-stone-300 text-xs font-mono text-stone-800 whitespace-pre-wrap leading-relaxed">
-                      {reasoning.model_thinking_trace}
-                    </pre>
-                  )}
-                </div>
-              )}
-            </div>
           </div>
+        </section>
+
+        {/* OPTIONAL INTERACTIVE NUMBER SIMULATOR */}
+        {showEditor && (
+          <section className="bg-amber-50/70 border-2 border-amber-300 rounded-2xl p-5 space-y-3 shadow-xs">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-extrabold text-amber-950 flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-amber-700" />
+                <span>
+                  Live Slip &amp; Auction Tamper Simulator (Updates Handwritten Slip Image
+                  &amp; APMC Audit Automatically)
+                </span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => handleSelectPreset(presetId)}
+                className="flex items-center gap-1 text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 px-3 py-1.5 rounded-lg cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Reset to Default</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 text-sm">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Bags (50kg)
+                </label>
+                <input
+                  type="number"
+                  value={spoken.bags}
+                  onChange={(e) =>
+                    updateSlipNumbers({ bags: Number(e.target.value) }, {})
+                  }
+                  className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-bold"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Auction Rate (₹)
+                </label>
+                <input
+                  type="number"
+                  value={spoken.agreed_rate_per_qtl}
+                  onChange={(e) =>
+                    updateSlipNumbers(
+                      { agreed_rate_per_qtl: Number(e.target.value) },
+                      {}
+                    )
+                  }
+                  className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-bold text-emerald-800"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Slip Net Wt (Qtl)
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={written.recorded_net_weight_qtl}
+                  onChange={(e) =>
+                    updateSlipNumbers(
+                      {},
+                      { recorded_net_weight_qtl: Number(e.target.value) }
+                    )
+                  }
+                  className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-bold text-red-700"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Slip Rate (₹)
+                </label>
+                <input
+                  type="number"
+                  value={written.written_rate_per_qtl}
+                  onChange={(e) =>
+                    updateSlipNumbers(
+                      {},
+                      { written_rate_per_qtl: Number(e.target.value) }
+                    )
+                  }
+                  className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-bold text-red-700"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Aadat Cut (₹)
+                </label>
+                <input
+                  type="number"
+                  value={written.deducted_aadat_inr}
+                  onChange={(e) =>
+                    updateSlipNumbers(
+                      {},
+                      { deducted_aadat_inr: Number(e.target.value) }
+                    )
+                  }
+                  className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-bold text-red-700"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Hammali (₹)
+                </label>
+                <input
+                  type="number"
+                  value={written.deducted_hammali_tulai_inr}
+                  onChange={(e) =>
+                    updateSlipNumbers(
+                      {},
+                      { deducted_hammali_tulai_inr: Number(e.target.value) }
+                    )
+                  }
+                  className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-bold"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Dharmada (₹)
+                </label>
+                <input
+                  type="number"
+                  value={written.deducted_dharmada_inr}
+                  onChange={(e) =>
+                    updateSlipNumbers(
+                      {},
+                      { deducted_dharmada_inr: Number(e.target.value) }
+                    )
+                  }
+                  className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-1.5 font-bold text-red-700"
+                />
+              </div>
+            </div>
+          </section>
         )}
 
-        {/* TAB 2: EVIDENCE (KACCHA PARCHI + SPOKEN TRANSCRIPT) */}
-        {activeTab === "evidence" && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            {/* Handwritten Kaccha Parchi with SVG Bounding Boxes */}
-            <div className="lg:col-span-7 bg-white border border-stone-200 rounded-2xl p-5 shadow-xs space-y-3">
-              <div>
-                <h3 className="text-lg font-extrabold text-stone-900">
-                  Written Slip (Kaccha Parchi)
-                </h3>
-                <p className="text-sm text-stone-600">
-                  Red dashed boxes highlight lines that break the auction deal or State
-                  APMC rules.
-                </p>
+        {/* 2. HERO VERDICT BANNER + 4 FINANCIAL CARDS */}
+        <section
+          className={`rounded-2xl border-2 p-5 sm:p-6 shadow-sm flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 ${
+            underpaid > 0
+              ? "bg-gradient-to-r from-red-50 via-orange-50/60 to-white border-red-300"
+              : "bg-gradient-to-r from-emerald-50 via-teal-50/50 to-white border-emerald-300"
+          }`}
+        >
+          <div className="space-y-1.5 max-w-3xl">
+            <div className="flex items-center gap-2">
+              <span
+                className={`px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider ${
+                  underpaid > 0
+                    ? "bg-red-700 text-white"
+                    : "bg-emerald-700 text-white"
+                }`}
+              >
+                {underpaid > 0
+                  ? `🚨 ${audit.violation_count} APMC STATUTORY VIOLATIONS DETECTED`
+                  : "✅ 100% COMPLIANT SETTLEMENT"}
+              </span>
+              <span className="text-xs font-semibold text-slate-600">
+                {audit.state_act_name}
+              </span>
+            </div>
+            <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900">
+              {reasoning.executive_verdict_title}
+            </h2>
+            <p className="text-sm sm:text-base text-slate-700 leading-relaxed">
+              {reasoning.legal_summary}
+            </p>
+          </div>
+
+          {/* Financial Summary Box */}
+          <div className="grid grid-cols-3 gap-3 w-full lg:w-auto shrink-0 bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
+            <div>
+              <div className="text-[11px] font-bold uppercase text-slate-500">
+                Lawful Payout
+              </div>
+              <div className="text-lg sm:text-xl font-extrabold text-emerald-700 mt-0.5">
+                {formatINR(audit.lawful_net_payable_inr)}
+              </div>
+            </div>
+            <div className="border-x border-slate-200 px-3">
+              <div className="text-[11px] font-bold uppercase text-slate-500">
+                Slip Written
+              </div>
+              <div className="text-lg sm:text-xl font-extrabold text-slate-700 mt-0.5">
+                {formatINR(audit.written_net_payable_inr)}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] font-bold uppercase text-slate-500">
+                {underpaid > 0 ? "Recovery Due" : "Discrepancy"}
+              </div>
+              <div
+                className={`text-lg sm:text-xl font-extrabold mt-0.5 ${
+                  underpaid > 0 ? "text-red-700" : "text-emerald-700"
+                }`}
+              >
+                {underpaid > 0 ? `+${formatINR(underpaid)}` : "₹0.00"}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ================================================================= */}
+        {/* 3. SIDE-BY-SIDE WORKBENCH: EVIDENCE (LEFT) + ARBITRATION (RIGHT)  */}
+        {/* ================================================================= */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* LEFT 5 COLS: HANDWRITTEN KACCHA PARCHI + SPOKEN AUDIO */}
+          <div className="lg:col-span-5 space-y-6">
+            {/* Handwritten Kaccha Parchi Card */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700">
+                    Stage 2 · Sarvam Vision ROI
+                  </span>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    Handwritten Kaccha Parchi Slip
+                  </h3>
+                </div>
+                <span className="text-xs text-slate-500">
+                  Hover regions to cross-highlight
+                </span>
               </div>
 
-              <div className="relative w-full rounded-xl overflow-hidden border border-stone-300 shadow-xs">
+              <div className="relative w-full rounded-xl overflow-hidden border border-slate-300 shadow-xs">
                 {parchiImageUrl && (
                   <img
                     src={parchiImageUrl}
@@ -878,11 +733,11 @@ export default function App() {
                         fill={
                           isActive
                             ? isBad
-                              ? "rgba(185, 28, 28, 0.20)"
+                              ? "rgba(185, 28, 28, 0.22)"
                               : "rgba(21, 128, 61, 0.18)"
                             : "transparent"
                         }
-                        stroke={isBad ? "#B91C1C" : "#15803D"}
+                        stroke={isBad ? "#DC2626" : "#16A34A"}
                         strokeWidth={isActive ? 7 : isBad ? 5 : 3}
                         strokeDasharray={isBad ? "14 6" : "none"}
                         onMouseEnter={() => setActiveFieldId(box.field_id)}
@@ -895,259 +750,382 @@ export default function App() {
               </div>
             </div>
 
-            {/* Spoken Auction Transcript & Timestamp Spans */}
-            <div className="lg:col-span-5 space-y-4">
-              <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-xs space-y-3">
-                <h3 className="text-lg font-extrabold text-stone-900">
-                  What Was Said at the Auction
+            {/* Spoken Auction Transcript & Timestamps Card */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-3">
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-sky-700">
+                  Stage 1 · Saaras v4 Code-Mixed ASR
+                </span>
+                <h3 className="text-base font-extrabold text-slate-900">
+                  Verbatim Spoken Auction (Boli)
                 </h3>
-                <blockquote className="border-l-4 border-amber-700 bg-amber-50/60 p-4 rounded-r-xl text-base font-medium text-stone-900 leading-relaxed">
-                  &ldquo;{spoken.transcript}&rdquo;
-                </blockquote>
-                <p className="text-xs text-stone-500">
-                  Language: <code>{spoken.language_code}</code> · Transcribed with{" "}
-                  <strong>Saaras v4</strong> (code-mixed mandi mode)
-                </p>
               </div>
 
-              <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-xs space-y-3">
-                <h4 className="text-base font-extrabold text-stone-900">
-                  Timestamped Audio Claims (Hover to Highlight Slip)
-                </h4>
-                <div className="space-y-2.5">
-                  {(spoken.timestamp_spans || []).map((span) => {
-                    const st = statusMap[span.field_id] || "COMPLIANT";
-                    const badge = STATUS_BADGE[st] || STATUS_BADGE.COMPLIANT;
-                    const active = activeFieldId === span.field_id;
-                    return (
-                      <div
-                        key={span.field_id}
-                        onMouseEnter={() => setActiveFieldId(span.field_id)}
-                        onMouseLeave={() => setActiveFieldId(null)}
-                        className={`p-3.5 rounded-xl border transition cursor-pointer ${
-                          active
-                            ? "bg-amber-50 border-amber-700"
-                            : "bg-stone-50/70 border-stone-200 hover:bg-white"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2 mb-1">
-                          <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-sky-100 text-sky-900">
-                            {span.time_label}
+              <blockquote className="border-l-4 border-amber-600 bg-amber-50/70 p-3.5 rounded-r-xl text-sm sm:text-base font-medium text-slate-900 leading-relaxed">
+                &ldquo;{spoken.transcript}&rdquo;
+              </blockquote>
+
+              <div className="space-y-2 pt-1">
+                {(spoken.timestamp_spans || []).map((span) => {
+                  const st = statusMap[span.field_id] || "COMPLIANT";
+                  const badge = STATUS_BADGE[st] || STATUS_BADGE.COMPLIANT;
+                  const active = activeFieldId === span.field_id;
+                  return (
+                    <div
+                      key={span.field_id}
+                      onMouseEnter={() => setActiveFieldId(span.field_id)}
+                      onMouseLeave={() => setActiveFieldId(null)}
+                      className={`p-3 rounded-xl border transition cursor-pointer ${
+                        active
+                          ? "bg-amber-50 border-amber-600"
+                          : "bg-slate-50 border-slate-200 hover:bg-white"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-sky-100 text-sky-900">
+                          [{span.time_label}]
+                        </span>
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${badge.cls}`}
+                        >
+                          {badge.label}
+                        </span>
+                      </div>
+                      <p className="text-sm font-semibold text-slate-900">
+                        &ldquo;{span.spoken_text}&rdquo;
+                      </p>
+                      <p className="text-xs font-bold text-amber-800 mt-0.5">
+                        → {span.extracted_claim}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* RIGHT 7 COLS: FACT-VS-HYPOTHESIS MATRIX + VOICE + MERKLE ANCHOR */}
+          <div className="lg:col-span-7 space-y-6">
+            {/* Fact-vs-Hypothesis Comparison Cards */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-purple-700">
+                    Stage 3 · Deterministic APMC Engine + Sarvam-105B
+                  </span>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    Spoken Deal vs. Written Slip Audit Breakdown
+                  </h3>
+                </div>
+
+                {apiKey && (
+                  <button
+                    type="button"
+                    onClick={handleAskSarvam105B}
+                    disabled={isCallingAi}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-700 hover:bg-purple-800 text-white text-xs font-bold cursor-pointer transition"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>
+                      {isCallingAi ? "Reviewing..." : "Run Live Sarvam-105B Review"}
+                    </span>
+                  </button>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                {audit.comparison_rows.map((row) => {
+                  const badge = STATUS_BADGE[row.status] || STATUS_BADGE.COMPLIANT;
+                  const active = activeFieldId === row.field_id;
+                  return (
+                    <div
+                      key={row.field_id}
+                      onMouseEnter={() => setActiveFieldId(row.field_id)}
+                      onMouseLeave={() => setActiveFieldId(null)}
+                      className={`p-4 rounded-xl border-2 transition cursor-pointer ${
+                        active
+                          ? "border-amber-600 bg-amber-50/40"
+                          : row.delta_inr > 0
+                          ? "border-red-200 bg-red-50/30 hover:border-red-300"
+                          : "border-slate-200 bg-slate-50/50"
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base font-extrabold text-slate-900">
+                            {row.parameter}
                           </span>
                           <span
-                            className={`text-xs font-bold px-2 py-0.5 rounded-full border ${badge.cls}`}
+                            className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${badge.cls}`}
                           >
                             {badge.label}
                           </span>
                         </div>
-                        <p className="text-base font-semibold text-stone-900">
-                          &ldquo;{span.spoken_text}&rdquo;
-                        </p>
-                        <p className="text-xs font-semibold text-amber-900 mt-1">
-                          → {span.extracted_claim}
-                        </p>
+                        <div
+                          className={`text-lg font-extrabold ${
+                            row.delta_inr > 0 ? "text-red-700" : "text-emerald-700"
+                          }`}
+                        >
+                          {row.delta_inr > 0
+                            ? `Farmer Loss: −${formatINR(row.delta_inr)}`
+                            : "₹0 Discrepancy"}
+                        </div>
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
 
-        {/* TAB 3: VOICE MESSAGE */}
-        {activeTab === "voice" && (
-          <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-xs space-y-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-extrabold text-stone-900 flex items-center gap-2">
-                  <Volume2 className="w-5 h-5 text-amber-700" />
-                  <span>Spoken Advisory for the Farmer (Bulbul v3)</span>
-                </h3>
-                <p className="text-sm text-stone-600">
-                  Choose an Indian language to read and hear the payout summary in native
-                  script.
-                </p>
-              </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm bg-white p-3 rounded-lg border border-slate-200">
+                        <div>
+                          <span className="block text-[11px] font-bold uppercase text-sky-700">
+                            Spoken at Auction ({row.spoken_timestamp})
+                          </span>
+                          <span className="font-semibold text-slate-900">
+                            {row.spoken_fact}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="block text-[11px] font-bold uppercase text-amber-800">
+                            Written on Slip
+                          </span>
+                          <span className="font-semibold text-slate-900">
+                            {row.written_fact}
+                          </span>
+                        </div>
+                      </div>
 
-              <div className="flex flex-wrap gap-1.5">
-                {LANGUAGES.map((l) => (
-                  <button
-                    key={l.code}
-                    type="button"
-                    onClick={() => {
-                      setSelectedLang(l.code);
-                      if (isPlaying && stopAudioRef.current) {
-                        stopAudioRef.current();
-                        stopAudioRef.current = null;
-                        setIsPlaying(false);
-                      }
-                    }}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
-                      selectedLang === l.code
-                        ? "bg-amber-700 text-white border-amber-700 shadow-xs"
-                        : "bg-stone-100 text-stone-800 border-stone-300 hover:bg-stone-200"
-                    }`}
-                  >
-                    {l.label}
-                  </button>
-                ))}
+                      <div className="mt-2.5 text-xs sm:text-sm text-slate-700 space-y-1">
+                        <div>
+                          <strong className="text-slate-900">Finding:</strong>{" "}
+                          {row.legal_hypothesis}
+                        </div>
+                        <div className="text-xs font-semibold text-slate-600">
+                          ⚖️ {row.bylaw_citation} · ➡️{" "}
+                          <span className="text-amber-900 font-bold">
+                            {row.enforcement_action}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
-            <div className="p-5 rounded-2xl bg-[#FFFBF5] border border-stone-300 text-xl leading-relaxed font-medium text-stone-900">
-              &ldquo;{activeVoiceScript}&rdquo;
-            </div>
-
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => handleSpeakVoice(selectedLang)}
-                className={`flex items-center gap-2 px-5 py-3 rounded-xl font-bold text-sm text-white shadow-sm cursor-pointer transition ${
-                  isPlaying
-                    ? "bg-red-700 hover:bg-red-800"
-                    : "bg-amber-700 hover:bg-amber-800"
-                }`}
-              >
-                {isPlaying ? (
-                  <>
-                    <Square className="w-4 h-4 fill-white" />
-                    <span>Stop Voice Playback</span>
-                  </>
-                ) : (
-                  <>
-                    <Play className="w-4 h-4 fill-white" />
-                    <span>
-                      Speak in{" "}
-                      {LANGUAGES.find((l) => l.code === selectedLang)?.label}
-                    </span>
-                  </>
-                )}
-              </button>
-              <span className="text-xs text-stone-500">
-                {apiKey
-                  ? "Uses live Sarvam Bulbul v3 (24kHz) with automatic browser fallback."
-                  : "Uses browser Indic voice synthesis (paste a Sarvam key in the sidebar for Bulbul v3 24kHz audio)."}
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 4: PROOF RECEIPT & QR */}
-        {activeTab === "proof" && merkle && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            <div className="lg:col-span-7 bg-white border border-stone-200 rounded-2xl p-6 shadow-xs space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-extrabold text-stone-900 flex items-center gap-2">
-                  <ShieldCheck className="w-5 h-5 text-emerald-700" />
-                  <span>Tamper-Evident SHA-256 Receipt</span>
-                </h3>
-                <span className="text-xs font-mono font-bold text-stone-600">
-                  {merkle.anchor_id}
-                </span>
-              </div>
-
-              <p className="text-sm text-stone-600 leading-relaxed">
-                Every piece of evidence is fingerprinted with SHA-256 and combined into a
-                single <strong>Merkle Root</strong>. If anyone alters the audio, slip, or
-                verdict, the root hash changes immediately.
-              </p>
-
-              <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 font-mono text-xs text-emerald-950 break-all flex items-center justify-between gap-2">
+            {/* Stage 4A: Bulbul v3 Multilingual Farmer Voice Card */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <strong className="block text-[11px] uppercase text-emerald-800">
-                    Merkle Root:
-                  </strong>
-                  {merkle.merkle_root}
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
+                    Stage 4A · Bulbul v3 Vernacular Voice Advisory
+                  </span>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    Speak Audit Result to Farmer in Native Script
+                  </h3>
                 </div>
+
+                <div className="flex flex-wrap gap-1">
+                  {LANGUAGES.map((l) => (
+                    <button
+                      key={l.code}
+                      type="button"
+                      onClick={() => {
+                        setSelectedLang(l.code);
+                        if (isPlaying && stopAudioRef.current) {
+                          stopAudioRef.current();
+                          stopAudioRef.current = null;
+                          setIsPlaying(false);
+                        }
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                        selectedLang === l.code
+                          ? "bg-emerald-700 text-white border-emerald-700"
+                          : "bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200"
+                      }`}
+                    >
+                      {l.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-amber-50/60 border border-amber-200 text-base sm:text-lg leading-relaxed font-medium text-slate-900">
+                &ldquo;{activeVoiceScript}&rdquo;
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <button
                   type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(merkle.merkle_root);
-                    setCopiedRoot(true);
-                    setTimeout(() => setCopiedRoot(false), 1800);
-                  }}
-                  className="shrink-0 px-2.5 py-1.5 rounded-lg bg-white border border-emerald-300 text-emerald-900 text-xs font-sans font-bold flex items-center gap-1 cursor-pointer"
+                  onClick={() => handleSpeakVoice(selectedLang)}
+                  className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm text-white shadow-sm cursor-pointer transition ${
+                    isPlaying
+                      ? "bg-red-700 hover:bg-red-800"
+                      : "bg-emerald-700 hover:bg-emerald-800"
+                  }`}
                 >
-                  {copiedRoot ? (
+                  {isPlaying ? (
                     <>
-                      <Check className="w-3.5 h-3.5" />
-                      <span>Copied</span>
+                      <Square className="w-4 h-4 fill-white" />
+                      <span>Stop Voice Playback</span>
                     </>
                   ) : (
                     <>
-                      <Copy className="w-3.5 h-3.5" />
-                      <span>Copy</span>
+                      <Play className="w-4 h-4 fill-white" />
+                      <span>
+                        Speak in{" "}
+                        {LANGUAGES.find((l) => l.code === selectedLang)?.label}
+                      </span>
                     </>
                   )}
                 </button>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono">
-                <div className="p-3 rounded-xl bg-stone-50 border border-stone-200">
-                  <div className="font-sans font-bold text-stone-600">
-                    Leaf 0 · Auction Audio
-                  </div>
-                  <div className="text-stone-900 mt-0.5">{merkle.leaf_0_audio_hash}</div>
-                </div>
-                <div className="p-3 rounded-xl bg-stone-50 border border-stone-200">
-                  <div className="font-sans font-bold text-stone-600">
-                    Leaf 1 · Kaccha Parchi Slip
-                  </div>
-                  <div className="text-stone-900 mt-0.5">{merkle.leaf_1_vision_hash}</div>
-                </div>
-                <div className="p-3 rounded-xl bg-stone-50 border border-stone-200">
-                  <div className="font-sans font-bold text-stone-600">
-                    Leaf 2 · Extracted Claims
-                  </div>
-                  <div className="text-stone-900 mt-0.5">{merkle.leaf_2_claims_hash}</div>
-                </div>
-                <div className="p-3 rounded-xl bg-stone-50 border border-stone-200">
-                  <div className="font-sans font-bold text-stone-600">
-                    Leaf 3 · Statutory Verdict
-                  </div>
-                  <div className="text-stone-900 mt-0.5">
-                    {merkle.leaf_3_verdict_hash}
-                  </div>
-                </div>
+                <span className="text-xs text-slate-500">
+                  {apiKey
+                    ? "Synthesizing with live Sarvam Bulbul v3 (24kHz)"
+                    : "Ready with instant Indic speech synthesis"}
+                </span>
               </div>
             </div>
 
-            <div className="lg:col-span-5 bg-white border border-stone-200 rounded-2xl p-6 shadow-xs flex flex-col items-center text-center space-y-4">
-              <h4 className="text-base font-extrabold text-stone-900">
-                Scan to Verify Receipt
-              </h4>
-              <DeterministicQrSvg payload={merkle.qr_verification_payload} size={184} />
-              <div>
-                <div className="text-xs font-bold uppercase tracking-wider text-stone-500">
-                  Eligible for 80% e-Mandi / ONDC Pledge Credit
+            {/* Stage 4B: SHA-256 Merkle Anchor & QR Certificate */}
+            {merkle && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs grid grid-cols-1 md:grid-cols-12 gap-5 items-center">
+                <div className="md:col-span-7 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                        Stage 4B · SHA-256 Cryptographic Proof
+                      </span>
+                      <h3 className="text-base font-extrabold text-slate-900">
+                        Record → Claim → Anchor Receipt
+                      </h3>
+                    </div>
+                    <span className="text-xs font-mono font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                      {merkle.anchor_id}
+                    </span>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-slate-900 text-emerald-300 font-mono text-xs break-all flex items-center justify-between gap-2">
+                    <div>
+                      <span className="text-slate-400 font-bold mr-1">
+                        MERKLE_ROOT:
+                      </span>
+                      {merkle.merkle_root}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(merkle.merkle_root);
+                        setCopiedRoot(true);
+                        setTimeout(() => setCopiedRoot(false), 1800);
+                      }}
+                      className="shrink-0 px-2 py-1 rounded bg-slate-800 text-white text-[11px] font-sans font-bold cursor-pointer"
+                    >
+                      {copiedRoot ? "Copied!" : "Copy"}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                    <div className="p-2 rounded-lg bg-slate-50 border border-slate-200">
+                      <span className="block text-[10px] font-sans font-bold text-sky-700">
+                        L0: Audio Hash
+                      </span>
+                      {merkle.leaf_0_audio_hash}
+                    </div>
+                    <div className="p-2 rounded-lg bg-slate-50 border border-slate-200">
+                      <span className="block text-[10px] font-sans font-bold text-amber-800">
+                        L1: Slip Vision Hash
+                      </span>
+                      {merkle.leaf_1_vision_hash}
+                    </div>
+                    <div className="p-2 rounded-lg bg-slate-50 border border-slate-200">
+                      <span className="block text-[10px] font-sans font-bold text-purple-700">
+                        L2: Claims Hash
+                      </span>
+                      {merkle.leaf_2_claims_hash}
+                    </div>
+                    <div className="p-2 rounded-lg bg-slate-50 border border-slate-200">
+                      <span className="block text-[10px] font-sans font-bold text-emerald-700">
+                        L3: Verdict Hash
+                      </span>
+                      {merkle.leaf_3_verdict_hash}
+                    </div>
+                  </div>
                 </div>
-                <div className="text-2xl font-extrabold text-amber-800 mt-0.5">
-                  {formatINR(merkle.ondc_credit_eligible_inr, 0)}
+
+                <div className="md:col-span-5 flex flex-col items-center text-center gap-2.5 border-t md:border-t-0 md:border-l border-slate-200 pt-4 md:pt-0 md:pl-5">
+                  <DeterministicQrSvg
+                    payload={merkle.qr_verification_payload}
+                    size={136}
+                  />
+                  <div>
+                    <div className="text-[11px] font-bold uppercase text-slate-500">
+                      80% ONDC / e-Mandi Credit Limit
+                    </div>
+                    <div className="text-xl font-extrabold text-amber-800">
+                      {formatINR(merkle.ondc_credit_eligible_inr, 0)}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const blob = new Blob([merkle.qr_verification_payload], {
+                        type: "application/json",
+                      });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = `${merkle.anchor_id}.json`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                    className="w-full py-2 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download Signed Receipt</span>
+                  </button>
                 </div>
               </div>
+            )}
+          </div>
+        </div>
+      </main>
+
+      {/* API KEY MODAL */}
+      {showKeyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4">
+          <div className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl p-6 space-y-4">
+            <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+              <KeyRound className="w-5 h-5 text-amber-600" />
+              <span>Configure Sarvam AI API Key</span>
+            </h3>
+            <p className="text-sm text-slate-600 leading-relaxed">
+              Mandi-Pramaan runs out-of-the-box in the browser. Enter your{" "}
+              <code>SARVAM_API_KEY</code> to enable live calls to{" "}
+              <strong>Sarvam-105B</strong> and <strong>Bulbul v3</strong> (24kHz audio).
+            </p>
+            <input
+              type="password"
+              value={draftKey}
+              onChange={(e) => setDraftKey(e.target.value)}
+              placeholder="sk_..."
+              className="w-full rounded-xl bg-slate-50 border border-slate-300 px-3.5 py-2.5 text-sm font-mono focus:outline-none focus:border-amber-600"
+            />
+            <div className="flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => {
-                  const blob = new Blob([merkle.qr_verification_payload], {
-                    type: "application/json",
-                  });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement("a");
-                  a.href = url;
-                  a.download = `${merkle.anchor_id}.json`;
-                  a.click();
-                  URL.revokeObjectURL(url);
-                }}
-                className="w-full py-2.5 px-4 rounded-xl bg-amber-700 hover:bg-amber-800 text-white font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition"
+                onClick={() => setShowKeyModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
               >
-                <Download className="w-4 h-4" />
-                <span>Download Signed Receipt (JSON)</span>
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSaveKey(draftKey.trim())}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white cursor-pointer"
+              >
+                Save Key
               </button>
             </div>
           </div>
-        )}
-      </main>
+        </div>
+      )}
     </div>
   );
 }
