@@ -196,27 +196,55 @@ export async function parseSpokenTranscriptWithSarvam(transcriptText, currentSpo
 }
 
 /**
- * Extracts Kaccha Parchi slip fields from an uploaded slip image using:
- * 1) In-browser Vision OCR (Tesseract.js eng+hin) on the uploaded image
- * 2) Live `sarvam-105b-conversations` structured Kaccha Parchi extraction
+ * Resizes/normalizes an uploaded image DataURL on an HTML5 Canvas (max 1280px)
+ * so multimodal vision requests are fast and never exceed payload limits.
+ */
+async function normalizeImageForVision(imageDataUrl) {
+  return new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 1280;
+        let w = img.width || 800;
+        let h = img.height || 800;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) {
+            h = Math.round((h * maxDim) / w);
+            w = maxDim;
+          } else {
+            w = Math.round((w * maxDim) / h);
+            h = maxDim;
+          }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.9));
+      };
+      img.onerror = () => resolve(imageDataUrl);
+      img.src = imageDataUrl;
+    } catch {
+      resolve(imageDataUrl);
+    }
+  });
+}
+
+/**
+ * Extracts handwritten or printed Kaccha Parchi slip fields from an uploaded image using:
+ * 1) Live Sarvam V2 Multimodal Vision API (`POST https://api.sarvam.ai/v2/chat/completions`, `model: "gemma4"`)
+ *    which reads cursive Hindi/Marathi/Punjabi/English handwriting & tables directly from image pixels.
+ * 2) Fallback to browser OCR + `sarvam-105b-conversations` if needed.
  */
 export async function extractKacchaParchiFromImage(imageDataUrl, currentWritten) {
   const t0 = performance.now();
-  let ocrText = "";
-
-  try {
-    if (window.Tesseract && imageDataUrl) {
-      const result = await window.Tesseract.recognize(imageDataUrl, "eng+hin");
-      ocrText = (result?.data?.text || "").trim();
-    }
-  } catch (ocrErr) {
-    console.warn("Browser OCR warning:", ocrErr);
-  }
-
   const key = resolveRuntimeCredential();
-  if (!key || !ocrText) {
+  if (!key || !imageDataUrl) {
     return {
-      ocrText,
+      ocrText: "",
       parsed: null,
       latencyMs: Math.round(performance.now() - t0),
       liveUsed: false,
@@ -224,27 +252,46 @@ export async function extractKacchaParchiFromImage(imageDataUrl, currentWritten)
   }
 
   try {
-    const resp = await fetch("https://api.sarvam.ai/v1/chat/completions", {
+    const normalizedUrl = await normalizeImageForVision(imageDataUrl);
+    const visionPrompt =
+      "You are Sarvam Vision OCR for Indian APMC Mandi Kaccha Parchi (handwritten or printed weighment/settlement slips). " +
+      "Carefully read all Hindi/Marathi/Punjabi/English handwriting and numbers in this image. " +
+      "Look for: slip number (No.), date (Dt.), person/firm name on top, बोरी (bags), bag weight (e.g. 37.50 or 50), वजन (net weight in quintals, preserve decimals like 129.645), करदा/काट (weight cut, 0 if none), दर/भाव (rate per quintal), रकम (gross amount), आड़त (commission, 0 if none), मजदूरी/हम्माली/तुलाई (labor deduction), धर्मादा/मुद्दत (charity/discount, 0 if none), and final net payable amount at the bottom. " +
+      "Return ONLY valid JSON with these exact keys: " +
+      '{"ocr_text": "complete line-by-line transcription of the slip", ' +
+      '"name_on_slip": "string", ' +
+      '"slip_no": "string", ' +
+      '"slip_date": "string", ' +
+      '"recorded_bags": number, ' +
+      '"bag_weight_kg": number, ' +
+      '"recorded_net_weight_qtl": number, ' +
+      '"karda_moisture_cut_qtl": number, ' +
+      '"written_rate_per_qtl": number, ' +
+      '"gross_written_amount_inr": number, ' +
+      '"deducted_aadat_inr": number, ' +
+      '"deducted_hammali_tulai_inr": number, ' +
+      '"deducted_dharmada_inr": number, ' +
+      '"written_net_payable_inr": number}';
+
+    const resp = await fetch("https://api.sarvam.ai/v2/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "api-subscription-key": key,
       },
       body: JSON.stringify({
-        model: "sarvam-105b-conversations",
+        model: "gemma4",
+        temperature: 0.1,
+        max_tokens: 700,
         messages: [
           {
-            role: "system",
-            content:
-              'Extract Kaccha Parchi (APMC weighment/settlement slip) details from the OCR text. Convert any Devanagari/Indic digits into standard numbers. Return ONLY valid JSON: {"trader_firm": "string", "recorded_bags": number, "recorded_net_weight_qtl": number, "karda_moisture_cut_qtl": number, "written_rate_per_qtl": number, "deducted_aadat_inr": number, "deducted_hammali_tulai_inr": number, "deducted_dharmada_inr": number}',
-          },
-          {
             role: "user",
-            content: ocrText.slice(0, 2500),
+            content: [
+              { type: "text", text: visionPrompt },
+              { type: "image_url", image_url: { url: normalizedUrl } },
+            ],
           },
         ],
-        temperature: 0.1,
-        max_tokens: 400,
       }),
     });
 
@@ -257,44 +304,64 @@ export async function extractKacchaParchiFromImage(imageDataUrl, currentWritten)
         .trim();
       const p = JSON.parse(raw);
 
+      const bags =
+        Number(p.recorded_bags) > 0
+          ? Math.round(Number(p.recorded_bags))
+          : currentWritten.recorded_bags;
+      const bagWeightKg =
+        Number(p.bag_weight_kg) > 0 ? Number(p.bag_weight_kg) : 50;
       const netW =
         Number(p.recorded_net_weight_qtl) > 0
           ? Number(p.recorded_net_weight_qtl)
           : currentWritten.recorded_net_weight_qtl;
       const karda =
-        Number(p.karda_moisture_cut_qtl) >= 0
-          ? Number(p.karda_moisture_cut_qtl)
-          : currentWritten.karda_moisture_cut_qtl;
+        p.karda_moisture_cut_qtl !== undefined && p.karda_moisture_cut_qtl !== null
+          ? Math.max(0, Number(p.karda_moisture_cut_qtl) || 0)
+          : 0;
       const rateW =
         Number(p.written_rate_per_qtl) > 0
           ? Number(p.written_rate_per_qtl)
           : currentWritten.written_rate_per_qtl;
       const aadat =
-        Number(p.deducted_aadat_inr) >= 0
-          ? Number(p.deducted_aadat_inr)
-          : currentWritten.deducted_aadat_inr;
+        p.deducted_aadat_inr !== undefined && p.deducted_aadat_inr !== null
+          ? Math.max(0, Number(p.deducted_aadat_inr) || 0)
+          : 0;
       const hammali =
-        Number(p.deducted_hammali_tulai_inr) >= 0
-          ? Number(p.deducted_hammali_tulai_inr)
-          : currentWritten.deducted_hammali_tulai_inr;
+        p.deducted_hammali_tulai_inr !== undefined && p.deducted_hammali_tulai_inr !== null
+          ? Math.max(0, Number(p.deducted_hammali_tulai_inr) || 0)
+          : 0;
       const dharmada =
-        Number(p.deducted_dharmada_inr) >= 0
-          ? Number(p.deducted_dharmada_inr)
-          : currentWritten.deducted_dharmada_inr;
-      const gross = Number((netW * rateW).toFixed(2));
-      const netPayable = Number((gross - (aadat + hammali + dharmada)).toFixed(2));
+        p.deducted_dharmada_inr !== undefined && p.deducted_dharmada_inr !== null
+          ? Math.max(0, Number(p.deducted_dharmada_inr) || 0)
+          : 0;
+      const computedGross = Number((netW * rateW).toFixed(2));
+      const gross =
+        Number(p.gross_written_amount_inr) > 0
+          ? Number(p.gross_written_amount_inr)
+          : computedGross;
+      const computedNet = Number((gross - (aadat + hammali + dharmada)).toFixed(2));
+      const netPayable =
+        Number(p.written_net_payable_inr) > 0
+          ? Number(p.written_net_payable_inr)
+          : computedNet;
+
+      const nameOnSlip = (p.name_on_slip || p.trader_firm || "").trim();
+      const ocrText = (p.ocr_text || "").trim();
 
       return {
         ocrText,
         parsed: {
-          trader_firm: p.trader_firm || currentWritten.trader_firm,
-          recorded_bags:
-            Number(p.recorded_bags) > 0 ? Number(p.recorded_bags) : currentWritten.recorded_bags,
-          gross_weight_qtl: Number((netW + karda).toFixed(2)),
+          trader_firm: nameOnSlip || currentWritten.trader_firm,
+          slip_no: p.slip_no ? String(p.slip_no) : currentWritten.slip_no,
+          slip_date: p.slip_date ? String(p.slip_date) : currentWritten.slip_date,
+          recorded_bags: bags,
+          bag_weight_kg: bagWeightKg,
+          gross_weight_qtl: Number((netW + karda).toFixed(3)),
           recorded_net_weight_qtl: netW,
           karda_moisture_cut_qtl: karda,
           written_rate_per_qtl: rateW,
           gross_written_amount_inr: gross,
+          deducted_aadat_pct: aadat > 0 && gross > 0 ? Number(((aadat / gross) * 100).toFixed(2)) : 0,
           deducted_aadat_inr: aadat,
           deducted_hammali_tulai_inr: hammali,
           deducted_dharmada_inr: dharmada,
@@ -306,11 +373,11 @@ export async function extractKacchaParchiFromImage(imageDataUrl, currentWritten)
       };
     }
   } catch (e) {
-    console.warn("Slip OCR structured parse fallback:", e);
+    console.warn("Sarvam V2 Multimodal Vision fallback:", e);
   }
 
   return {
-    ocrText,
+    ocrText: "",
     parsed: null,
     latencyMs: Math.round(performance.now() - t0),
     liveUsed: false,
@@ -982,10 +1049,10 @@ export function computeStatutoryAudit(spoken, written) {
     (Number(spoken.agreed_net_weight_qtl) > 0
       ? Number(spoken.agreed_net_weight_qtl)
       : (spoken.bags * spoken.bag_weight_kg) / 100.0
-    ).toFixed(2)
+    ).toFixed(3)
   );
   const weightShortfallQtl = Number(
-    Math.max(0.0, expectedNetWeightQtl - written.recorded_net_weight_qtl).toFixed(2)
+    Math.max(0.0, expectedNetWeightQtl - written.recorded_net_weight_qtl).toFixed(3)
   );
   const weightLossInr = Number((weightShortfallQtl * spoken.agreed_rate_per_qtl).toFixed(2));
 

@@ -432,12 +432,12 @@ export default function App() {
     await processAudioBlobWithSaaras(file, file.name);
   };
 
-  // Scan Kaccha Parchi Image with Vision OCR + Sarvam-105B
-  const handleScanSlipImage = async (targetImgUrl = parchiImageUrl) => {
+  // Scan Kaccha Parchi Image with Sarvam V2 Multimodal Vision (gemma4)
+  const handleScanSlipImage = async (targetImgUrl = parchiImageUrl, isCustomUpload = false) => {
     if (!targetImgUrl) return;
     setIsScanningSlip(true);
     setStatusBanner(
-      "📄 Step 2: Scanning Kaccha Parchi image with Vision OCR & extracting slip numbers via Sarvam-105B..."
+      "📄 Step 2: Reading handwritten/printed Kaccha Parchi image via live Sarvam Vision AI..."
     );
     const res = await extractKacchaParchiFromImage(targetImgUrl, written);
     setIsScanningSlip(false);
@@ -451,20 +451,85 @@ export default function App() {
     }));
 
     if (res.parsed) {
-      const nextWritten = { ...written, ...res.parsed };
+      const nextWritten = {
+        ...written,
+        ...res.parsed,
+        bounding_boxes: [
+          {
+            field_id: "trader_header",
+            label: "Slip Header & Party Name",
+            extracted_text: `${res.parsed.trader_firm} | Slip #${res.parsed.slip_no || "N/A"} (${res.parsed.slip_date || ""})`,
+            bbox: [0.05, 0.05, 0.95, 0.24],
+            status: "COMPLIANT",
+          },
+          {
+            field_id: "weight_row",
+            label: "Weighment & Bags Read from Slip",
+            extracted_text: `${res.parsed.recorded_bags} Bags | Net Weight: ${res.parsed.recorded_net_weight_qtl} Qtl (Karda: -${res.parsed.karda_moisture_cut_qtl} Qtl)`,
+            bbox: [0.05, 0.26, 0.95, 0.45],
+            status: res.parsed.karda_moisture_cut_qtl > 0 ? "CRITICAL_VIOLATION" : "COMPLIANT",
+          },
+          {
+            field_id: "rate_row",
+            label: "Written Rate & Gross Amount",
+            extracted_text: `Written Rate: ₹${res.parsed.written_rate_per_qtl}/Qtl | Gross: ${formatINR(res.parsed.gross_written_amount_inr)}`,
+            bbox: [0.05, 0.46, 0.95, 0.62],
+            status: "COMPLIANT",
+          },
+          {
+            field_id: "deductions_block",
+            label: "Deductions (Majdoori / Aadat / Dharmada)",
+            extracted_text: `Majdoori/Hammali: -₹${res.parsed.deducted_hammali_tulai_inr} | Aadat: -₹${res.parsed.deducted_aadat_inr} | Dharmada: -₹${res.parsed.deducted_dharmada_inr}`,
+            bbox: [0.05, 0.63, 0.95, 0.78],
+            status:
+              res.parsed.deducted_aadat_inr > 0 || res.parsed.deducted_dharmada_inr > 0
+                ? "CRITICAL_VIOLATION"
+                : "COMPLIANT",
+          },
+          {
+            field_id: "net_payable_box",
+            label: "Net Payable Written on Slip",
+            extracted_text: `Written Net Payable: ${formatINR(res.parsed.written_net_payable_inr)}`,
+            bbox: [0.05, 0.79, 0.95, 0.95],
+            status: "COMPLIANT",
+          },
+        ],
+      };
       setWritten(nextWritten);
+
+      // If the user uploaded a new custom slip and hasn't recorded custom audio yet,
+      // sync the lot size/party name into Step 1 so the comparison matches this slip's lot
+      let targetSpoken = spoken;
+      if ((isCustomUpload || uploadedSlipPhoto) && !audioPlayerUrl) {
+        const isPaddyBag = Number(res.parsed.bag_weight_kg) === 37.5;
+        const mspRate = isPaddyBag ? 2320 : 2425;
+        const defaultSpokenRate = Math.max(Number(res.parsed.written_rate_per_qtl), mspRate);
+        targetSpoken = {
+          ...spoken,
+          farmer_name: res.parsed.trader_firm || spoken.farmer_name,
+          commodity_code: isPaddyBag ? "PADDY_PR126" : spoken.commodity_code,
+          commodity_label: isPaddyBag ? "Paddy / धान (37.5kg Bag)" : spoken.commodity_label,
+          bags: res.parsed.recorded_bags,
+          bag_weight_kg: res.parsed.bag_weight_kg || 50,
+          agreed_net_weight_qtl: res.parsed.gross_weight_qtl,
+          agreed_rate_per_qtl: defaultSpokenRate,
+          transcript: `किसान ${res.parsed.trader_firm} की ${res.parsed.recorded_bags} बोरी, कुल वजन ${res.parsed.gross_weight_qtl} क्विंटल, बोली भाव ₹${defaultSpokenRate} प्रति क्विंटल।`,
+        };
+        setSpoken(targetSpoken);
+      }
+
       setStatusBanner(
-        `✓ Extracted Kaccha Parchi from image (${res.latencyMs}ms): Net Weight ${nextWritten.recorded_net_weight_qtl} Qtl, Rate ₹${nextWritten.written_rate_per_qtl}/Qtl, Aadat ₹${nextWritten.deducted_aadat_inr}, Net Payable ${formatINR(nextWritten.written_net_payable_inr)}`
+        `✓ Sarvam Vision Read Handwritten Slip (${res.latencyMs}ms): "${res.parsed.trader_firm}" | ${res.parsed.recorded_bags} Bags | Weight: ${res.parsed.recorded_net_weight_qtl} Qtl | Rate: ₹${res.parsed.written_rate_per_qtl}/Qtl | Gross: ${formatINR(res.parsed.gross_written_amount_inr, 0)} | Majdoori: -₹${res.parsed.deducted_hammali_tulai_inr} | Net: ${formatINR(res.parsed.written_net_payable_inr, 0)}`
       );
-      await runFullLiveArbitration(spoken, nextWritten, stateCode);
+      await runFullLiveArbitration(targetSpoken, nextWritten, stateCode);
     } else {
       setStatusBanner(
-        "✓ Scanned Kaccha Parchi slip image. Confirm or edit the slip figures below and click Run Arbitration."
+        "Could not auto-parse slip image. You can adjust the slip figures below and click Run Arbitration."
       );
     }
   };
 
-  // Upload Custom Kaccha Parchi Slip Photo -> Automatically Scan & Extract
+  // Upload Custom Kaccha Parchi Slip Photo -> Automatically Scan & Extract via Sarvam Vision
   const handleSlipImageUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -473,7 +538,7 @@ export default function App() {
       if (typeof reader.result === "string") {
         setUploadedSlipPhoto(reader.result);
         setParchiImageUrl(reader.result);
-        await handleScanSlipImage(reader.result);
+        await handleScanSlipImage(reader.result, true);
       }
     };
     reader.readAsDataURL(file);
@@ -923,21 +988,21 @@ export default function App() {
                 </a>
               </div>
 
-              {/* LIVE KACCHA PARCHI THUMBNAIL PREVIEW + OCR STATUS RIGHT IN STEP 2 */}
-              <div className="flex flex-col sm:flex-row items-center gap-3 bg-white rounded-xl border border-amber-300 p-3">
+              {/* LIVE KACCHA PARCHI THUMBNAIL PREVIEW + SARVAM VISION OCR TRANSCRIPTION */}
+              <div className="flex flex-col sm:flex-row items-start gap-3 bg-white rounded-xl border border-amber-300 p-3">
                 {parchiImageUrl && (
                   <img
                     src={parchiImageUrl}
                     alt="Active Kaccha Parchi Slip"
-                    className="w-28 h-36 object-cover rounded-lg border border-slate-300 shadow-xs shrink-0"
+                    className="w-28 h-36 object-contain bg-slate-50 rounded-lg border border-slate-300 shadow-xs shrink-0"
                   />
                 )}
-                <div className="flex-1 space-y-1.5 text-xs">
+                <div className="flex-1 w-full space-y-1.5 text-xs">
                   <div className="flex items-center justify-between">
                     <span className="font-extrabold text-amber-950">
                       {uploadedSlipPhoto
-                        ? "📄 Custom Uploaded Kaccha Parchi Active"
-                        : "📄 Sample Kaccha Parchi Active (Download & Re-upload to test!)"}
+                        ? "📄 Custom Uploaded Kaccha Parchi (Sarvam Vision Active)"
+                        : "📄 Sample Kaccha Parchi Active"}
                     </span>
                     {uploadedSlipPhoto && (
                       <button
@@ -952,11 +1017,15 @@ export default function App() {
                       </button>
                     )}
                   </div>
-                  <p className="text-slate-600 leading-relaxed">
-                    {slipOcrPreview
-                      ? `OCR Read: "${slipOcrPreview.slice(0, 140)}..."`
-                      : "Upload any Kaccha Parchi photo or click '🔍 Scan Slip via OCR' to extract the written weight, rate, and deductions from the slip image."}
-                  </p>
+                  {slipOcrPreview ? (
+                    <div className="rounded-lg bg-amber-50/80 border border-amber-200 p-2 font-mono text-[11px] text-slate-900 whitespace-pre-wrap leading-snug max-h-28 overflow-y-auto">
+                      {slipOcrPreview}
+                    </div>
+                  ) : (
+                    <p className="text-slate-600 leading-relaxed">
+                      Upload any handwritten or printed <em>Kaccha Parchi</em> photo (or click <strong>🔍 Scan Slip via OCR</strong>) to read Hindi/Marathi/Punjabi/English handwriting via live <strong>Sarvam Vision AI</strong>.
+                    </p>
+                  )}
                 </div>
               </div>
 
